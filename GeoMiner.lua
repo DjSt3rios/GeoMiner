@@ -424,9 +424,7 @@ function manageInventory()
         end
     end
 
-    if junkFound then
-        turtle.select(1) -- Select slot 1 again by default
-    end
+    turtle.select(1)
 end
 
 function simpleReturnToStart(currentPos, direction)
