@@ -380,6 +380,97 @@ function removeBlockAt(x, y, z, blocks)
     end
 end
 
+function simpleReturnToStart(currentPos, direction)
+    addLog("simpleReturnToStart: Returning to {0,0,0} from " .. table.concat(currentPos, ","))
+
+    local success = true
+
+    -- 1. Return Y axis (reverse of mining order)
+    if currentPos[2] > 0 then
+        addLog("Returning Down: " .. currentPos[2] .. " blocks")
+        for i = 1, currentPos[2] do
+            while turtle.detectDown() do turtle.digDown() end
+            if not turtle.down() then
+                addLog("!! simpleReturnToStart: BLOCKED moving down !!")
+                success = false
+                goto return_failed
+            end
+        end
+    elseif currentPos[2] < 0 then
+        addLog("Returning Up: " .. math.abs(currentPos[2]) .. " blocks")
+        for i = 1, math.abs(currentPos[2]) do
+            while turtle.detectUp() do turtle.digUp() end
+            if not turtle.up() then
+                addLog("!! simpleReturnToStart: BLOCKED moving up !!")
+                success = false
+                goto return_failed
+            end
+        end
+    end
+    currentPos[2] = 0 -- We are now at Y=0
+
+    -- 2. Return Z axis
+    if currentPos[3] > 0 then
+        addLog("Returning North: " .. currentPos[3] .. " blocks")
+        turnTo("N", direction)
+        for i = 1, currentPos[3] do
+            while turtle.detect() do turtle.dig() end
+            if not turtle.forward() then
+                addLog("!! simpleReturnToStart: BLOCKED moving north !!")
+                success = false
+                goto return_failed
+            end
+        end
+    elseif currentPos[3] < 0 then
+        addLog("Returning South: " .. math.abs(currentPos[3]) .. " blocks")
+        turnTo("S", direction)
+        for i = 1, math.abs(currentPos[3]) do
+            while turtle.detect() do turtle.dig() end
+            if not turtle.forward() then
+                addLog("!! simpleReturnToStart: BLOCKED moving south !!")
+                success = false
+                goto return_failed
+            end
+        end
+    end
+    currentPos[3] = 0 -- We are now at Z=0
+
+    -- 3. Return X axis
+    if currentPos[1] > 0 then
+        addLog("Returning West: " .. currentPos[1] .. " blocks")
+        turnTo("W", direction)
+        for i = 1, currentPos[1] do
+            while turtle.detect() do turtle.dig() end
+            if not turtle.forward() then
+                addLog("!! simpleReturnToStart: BLOCKED moving west !!")
+                success = false
+                goto return_failed
+            end
+        end
+    elseif currentPos[1] < 0 then
+        addLog("Returning East: " .. math.abs(currentPos[1]) .. " blocks")
+        turnTo("E", direction)
+        for i = 1, math.abs(currentPos[1]) do
+            while turtle.detect() do turtle.dig() end
+            if not turtle.forward() then
+                addLog("!! simpleReturnToStart: BLOCKED moving east !!")
+                success = false
+                goto return_failed
+            end
+        end
+    end
+    currentPos[1] = 0 -- We are now at X=0
+
+    ::return_failed::
+    if not success then
+        addLog("simpleReturnToStart: Return to start FAILED.")
+    else
+        addLog("simpleReturnToStart: Return to start successful.")
+    end
+
+    return success
+end
+
 function AStarMiner()
     addLog("AStarMiner thread started.")
     local startBlocksLen = countNeededBlocks(blocksToMine, blocks)
@@ -400,7 +491,14 @@ function AStarMiner()
                 minerStatusLabel:setForeground(colors.black)
                 minerStatusLabel:setText("Returning at start")
                 addLog("AStarMiner: Returning to start.")
-                goTo(-currentPos[1], -currentPos[2], -currentPos[3], direction, blocks)
+
+                local success = goTo(-currentPos[1], -currentPos[2], -currentPos[3], direction, blocks)
+                if not success then
+                    addLog("AStarMiner: !! FAILED to return to start !!")
+                    minerStatusLabel:setText("Return failed!")
+                    minerStatusLabel:setForeground(colors.red)
+                    os.sleep(2) -- Give user time to see
+                end
             end
 
             minerStatusLabel:setForeground(colors.lime)
@@ -524,7 +622,13 @@ function miner()
                 minerStatusLabel:setForeground(colors.black)
                 minerStatusLabel:setText("Returning at start")
                 addLog("Miner: Returning to start.")
-                goTo(-currentPos[1], -currentPos[2], -currentPos[3], direction, blocks)
+                local success = simpleReturnToStart(currentPos, direction)
+                if not success then
+                    addLog("Miner: !! FAILED to return to start !!")
+                    minerStatusLabel:setText("Return failed!")
+                    minerStatusLabel:setForeground(colors.red)
+                    os.sleep(2)
+                end
             end
 
             minerStatusLabel:setForeground(colors.lime)
