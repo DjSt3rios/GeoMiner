@@ -24,7 +24,7 @@ local frames = {}
 
 -- Scanner
 local scanRadius = -1
-local scanner = peripheral.find("geoScanner")
+local scanner = peripheral.find("geo_scanner")
 local blocks = {}
 local blocksNamesSet = {}
 local blocksToMine = {}
@@ -44,6 +44,23 @@ local minerCheckboxRetHLabel = nil
 local returnAtStart = false
 local goToChangeLabel = false
 local currentBlockName = ""
+
+-- NEW: Logging variables
+local logList = nil
+local MAX_LOG_LINES = 100
+
+-- NEW: Logging function
+function addLog(message)
+    if logList then
+        logList:addItem(tostring(message))
+        -- Prune old logs to prevent memory issues
+        if #logList:getAll() > MAX_LOG_LINES then
+            logList:removeItem(1) -- Remove the oldest item (at index 1)
+        end
+    end
+    print("[LOG] " .. tostring(message)) -- Also print to console for good measure
+end
+
 
 function getSetLen(set)
     local ret = 0
@@ -110,7 +127,7 @@ function aStar(start, goal, blockMap)
             end
         end
 
-        
+
         local curPos = {}
         for num in string.gmatch(current, "-?%d+") do
             table.insert(curPos, tonumber(num))
@@ -125,15 +142,15 @@ function aStar(start, goal, blockMap)
                     table.insert(pos, tonumber(num))
                 end
                 table.insert(path, 1, pos)
-                current = cameFrom[current]
+                return path
             end
             return path
         end
 
-        
+
         openSet[current] = nil
 
-        
+
         local neighbors = {
             {curPos[1] + 1, curPos[2], curPos[3]},
             {curPos[1] - 1, curPos[2], curPos[3]},
@@ -164,14 +181,22 @@ end
 
 function moveTurtle(path, direction)
     local directions = {["N"] = 0, ["E"] = 1, ["S"] = 2, ["W"] = 3}
+    addLog("moveTurtle: Following path of length " .. #path)
     for i = 2, #path do
         local cur, next = path[i-1], path[i]
         local dir = directionFromTo(cur[1], cur[2], cur[3], next[1], next[2], next[3])
+        addLog("moveTurtle: Step " .. (i-1) .. " -> " .. dir)
 
         if dir == "up" then
-            turtle.up()
+            if not turtle.up() then
+                addLog("moveTurtle: !! FAILED to move up !! Path aborted.")
+                return false -- FIX: Report failure
+            end
         elseif dir == "down" then
-            turtle.down()
+            if not turtle.down() then
+                addLog("moveTurtle: !! FAILED to move down !! Path aborted.")
+                return false -- FIX: Report failure
+            end
         else
             local targetDirection = directions[dir]
             local currentDirection = directions[direction[1]]
@@ -188,9 +213,14 @@ function moveTurtle(path, direction)
             end
 
             direction[1] = dir
-            turtle.forward()
+            if not turtle.forward() then
+                 addLog("moveTurtle: !! FAILED to move forward !! Path aborted.")
+                 return false -- FIX: Report failure
+            end
         end
     end
+    addLog("moveTurtle: Path complete.")
+    return true -- FIX: Report success
 end
 
 
@@ -198,17 +228,20 @@ function goTo(x, y, z, startDirection, blocks)
     local start = {0, 0, 0}
     local goal = {x, y, z}
     local blockMap = createBlockMap(blocks)
+
+    addLog("goTo: Finding A* path to " .. x .. "," .. y .. "," .. z)
     local path = aStar(start, goal, blockMap)
-    
+
     if goToChangeLabel then
         minerStatusLabel:setForeground(colors.black)
         minerStatusLabel:setText("Moving to "..currentBlockName)
     end
 
     if path then
-        moveTurtle(path, startDirection)
-        return true
+        addLog("goTo: Path found, length " .. #path .. ". Moving.")
+        return moveTurtle(path, startDirection) -- FIX: Return success/fail of movement
     else
+        addLog("goTo: !! No path found !!")
         return false
     end
 
@@ -221,7 +254,7 @@ end
 
 function countNeededBlocks(blocksToMine, blocks)
     cnt = 0
-    
+
     for i = 1, #blocks do
         if blocksToMine[splitString(blocks[i].name, ":")[2]] then
             cnt = cnt + 1
@@ -229,13 +262,13 @@ function countNeededBlocks(blocksToMine, blocks)
     end
 
     return cnt
-    
+
 end
 
 
 function moveToNearestFree(x, y, z, direction, blocks)
     local blockMap = createBlockMap(blocks)
-
+    addLog("moveToNearestFree: Finding free neighbor for block at " .. x .. "," .. y .. "," .. z)
 
     local neighbors = {
         {x + 1, y, z, "W"},
@@ -248,12 +281,20 @@ function moveToNearestFree(x, y, z, direction, blocks)
 
     for _, neighbor in ipairs(neighbors) do
         local nx, ny, nz, blockDirection = neighbor[1], neighbor[2], neighbor[3], neighbor[4]
+        addLog("moveToNearestFree: Checking neighbor " .. nx .. "," .. ny .. "," .. nz)
         if isBlockFree(nx, ny, nz, blockMap) then
-            goTo(nx, ny, nz, direction, blocks)
-            return {neighbor, {x, y, z}}
+            addLog("moveToNearestFree: Neighbor is free. Attempting goTo...")
+            -- FIX: Check if goTo is successful before returning
+            if goTo(nx, ny, nz, direction, blocks) then
+                addLog("moveToNearestFree: goTo successful. Returning neighbor.")
+                return {neighbor, {x, y, z}}
+            else
+                addLog("moveToNearestFree: goTo FAILED for this neighbor. Trying next.")
+            end
         end
     end
 
+    addLog("moveToNearestFree: !! No free AND reachable neighbor found !!")
     return nil
 end
 
@@ -263,7 +304,7 @@ function findClosestBlock(blocksToMine, blocks, startPos)
 
     for _, block in ipairs(blocks) do
         local blockType = splitString(block.name, ":")[2]
-        
+
         if blocksToMine[blockType] then
             local distance = manhattanDist(startPos[1], startPos[2], startPos[3], block.x, block.y, block.z)
             if distance < min_distance then
@@ -277,6 +318,9 @@ function findClosestBlock(blocksToMine, blocks, startPos)
 end
 
 function turnTo(newDirection, direction)
+    if direction[1] == newDirection then return end -- NEW: Don't turn if already facing
+    addLog("Turning from " .. direction[1] .. " to " .. newDirection)
+
     if direction[1] == "S" then
         if newDirection == "W" then
             turtle.turnRight()
@@ -330,10 +374,14 @@ function removeBlockAt(x, y, z, blocks)
         end
     end
 
-    table.remove(blocks, indexToRemove)
+    if indexToRemove ~= -1 then
+        -- addLog("Removing block from list at " .. x .. "," .. y .. "," .. z) -- DEBUG: very verbose
+        table.remove(blocks, indexToRemove)
+    end
 end
 
 function AStarMiner()
+    addLog("AStarMiner thread started.")
     local startBlocksLen = countNeededBlocks(blocksToMine, blocks)
     local dug = 0
     minerStatusLabel:show()
@@ -342,19 +390,22 @@ function AStarMiner()
     local offset = {0, 0, 0}
 
     while true do
+        addLog("AStarMiner: Finding closest block...")
         local closestBlock = findClosestBlock(blocksToMine, blocks, offset)
 
         if closestBlock == nil then
+            addLog("AStarMiner: No more blocks found.")
             if returnAtStart then
                 goToChangeLabel = false
                 minerStatusLabel:setForeground(colors.black)
                 minerStatusLabel:setText("Returning at start")
-
+                addLog("AStarMiner: Returning to start.")
                 goTo(-currentPos[1], -currentPos[2], -currentPos[3], direction, blocks)
             end
 
             minerStatusLabel:setForeground(colors.lime)
             minerStatusLabel:setText("Done!")
+            addLog("AStarMiner: Done!")
             minerProgressBar:hide()
             minerProgressLabel:hide()
             minerStartButton:show()
@@ -369,7 +420,8 @@ function AStarMiner()
         end
 
         currentBlockName = splitString(closestBlock.name, ":")[2]
-        
+        addLog("AStarMiner: Found target: " .. currentBlockName .. " at " .. closestBlock.x .. "," .. closestBlock.y .. "," .. closestBlock.z)
+
         minerStatusLabel:setForeground(colors.black)
         minerStatusLabel:setText("Finding path to "..currentBlockName)
 
@@ -378,20 +430,26 @@ function AStarMiner()
         if moveResult == nil then
             minerStatusLabel:setForeground(colors.yellow)
             minerStatusLabel:setText("Can't find path to "..currentBlockName..". Skipping.")
+            addLog("AStarMiner: !! Can't find path to " .. currentBlockName .. ". Skipping.")
             os.sleep(1)
-            
+
             local removeIndex = -1
 
-            for _, block in ipairs(blocks) do
+            for i, block in ipairs(blocks) do -- FIX: Use i, block
                 if block.x == closestBlock.x and block.y == closestBlock.y and block.z == closestBlock.z then
-                    removeIndex = _
+                    removeIndex = i
+                    break -- FIX: Break once found
                 end
             end
 
-            table.remove(blocks, removeIndex)
-            dug = dug + 1
-            minerProgressBar:setProgress(math.floor(dug / startBlocksLen * 100))
-            minerProgressLabel:setText(tostring(math.floor(dug / startBlocksLen * 100)).."%")
+            if removeIndex ~= -1 then -- FIX: Check if found
+                table.remove(blocks, removeIndex)
+            end
+
+            -- This block was skipped, not dug
+            -- dug = dug + 1
+            -- minerProgressBar:setProgress(math.floor(dug / startBlocksLen * 100))
+            -- minerProgressLabel:setText(tostring(math.floor(dug / startBlocksLen * 100)).."%")
             goto continue
         end
 
@@ -399,8 +457,11 @@ function AStarMiner()
         offset[2] = moveResult[1][2]
         offset[3] = moveResult[1][3]
 
+        addLog("AStarMiner: Moved to " .. offset[1] .. "," .. offset[2] .. "," .. offset[3])
+
         minerStatusLabel:setForeground(colors.black)
         minerStatusLabel:setText("Digging "..currentBlockName)
+        addLog("AStarMiner: Digging " .. currentBlockName .. " from direction " .. moveResult[1][4])
 
         if moveResult[1][4] == "U" then
             while turtle.detectUp() do
@@ -418,8 +479,10 @@ function AStarMiner()
         end
 
         dug = dug + 1
+        addLog("AStarMiner: Dug block. Total: " .. dug .. "/" .. startBlocksLen)
 
         removeBlockAt(moveResult[2][1], moveResult[2][2], moveResult[2][3], blocks)
+        addLog("AStarMiner: Re-basing coordinates.")
 
         for i = 1, #blocks do
             blocks[i].x = blocks[i].x - offset[1]
@@ -442,6 +505,7 @@ function AStarMiner()
 end
 
 function miner()
+    addLog("Miner (Simple) thread started.")
     local startBlocksLen = countNeededBlocks(blocksToMine, blocks)
     local dug = 0
     minerStatusLabel:show()
@@ -450,20 +514,22 @@ function miner()
     local offset = {0, 0, 0}
 
     while true do
-
+        addLog("Miner: Finding closest block...")
         local block = findClosestBlock(blocksToMine, blocks, offset)
 
         if block == nil then
+            addLog("Miner: No more blocks found.")
             if returnAtStart then
                 goToChangeLabel = false
                 minerStatusLabel:setForeground(colors.black)
                 minerStatusLabel:setText("Returning at start")
-        
+                addLog("Miner: Returning to start.")
                 goTo(-currentPos[1], -currentPos[2], -currentPos[3], direction, blocks)
             end
-        
+
             minerStatusLabel:setForeground(colors.lime)
             minerStatusLabel:setText("Done!")
+            addLog("Miner: Done!")
             minerProgressBar:hide()
             minerProgressLabel:hide()
             minerStartButton:show()
@@ -474,88 +540,120 @@ function miner()
             minerCheckboxUsePathfLabel:show()
             minerCheckboxRetHLabel:show()
 
-
             break
         end
-        
+
         currentBlockName = splitString(block.name, ":")[2]
+        addLog("Miner: Found target: " .. currentBlockName .. " at " .. block.x .. "," .. block.y .. "," .. block.z)
 
         if blocksToMine[currentBlockName] then
             minerStatusLabel:setForeground(colors.black)
             minerStatusLabel:setText("Moving to "..currentBlockName)
+            addLog("Miner: Moving to " .. currentBlockName)
 
             if block.x > 0 then
+                addLog("Miner: Moving East...")
                 turnTo("E", direction)
                 while offset[1] ~= block.x do
-                    while turtle.detect() do
-                        turtle.dig()
+                    while turtle.detect() do turtle.dig() end
+
+                    -- FIX: Add movement check
+                    if not turtle.forward() then
+                        addLog("Miner: !! MOVEMENT BLOCKED (East) !! Skipping block.")
+                        minerStatusLabel:setText("Movement blocked! Skipping.")
+                        goto next_block
                     end
 
                     offset[1] = offset[1] + 1
                     removeBlockAt(offset[1], offset[2], offset[3], blocks)
-                    turtle.forward()
                 end
             else
+                addLog("Miner: Moving West...")
                 turnTo("W", direction)
                 while offset[1] ~= block.x do
-                    while turtle.detect() do
-                        turtle.dig()
+                    while turtle.detect() do turtle.dig() end
+
+                    -- FIX: Add movement check
+                    if not turtle.forward() then
+                        addLog("Miner: !! MOVEMENT BLOCKED (West) !! Skipping block.")
+                        minerStatusLabel:setText("Movement blocked! Skipping.")
+                        goto next_block
                     end
 
                     offset[1] = offset[1] - 1
                     removeBlockAt(offset[1], offset[2], offset[3], blocks)
-                    turtle.forward()
                 end
             end
 
             if block.z > 0 then
+                addLog("Miner: Moving South...")
                 turnTo("S", direction)
                 while offset[3] ~= block.z do
-                    while turtle.detect() do
-                        turtle.dig()
+                    while turtle.detect() do turtle.dig() end
+
+                    -- FIX: Add movement check
+                    if not turtle.forward() then
+                        addLog("Miner: !! MOVEMENT BLOCKED (South) !! Skipping block.")
+                        minerStatusLabel:setText("Movement blocked! Skipping.")
+                        goto next_block
                     end
 
                     offset[3] = offset[3] + 1
                     removeBlockAt(offset[1], offset[2], offset[3], blocks)
-                    turtle.forward()
                 end
             else
+                addLog("Miner: Moving North...")
                 turnTo("N", direction)
                 while offset[3] ~= block.z do
-                    while turtle.detect() do
-                        turtle.dig()
+                    while turtle.detect() do turtle.dig() end
+
+                    -- FIX: Add movement check
+                    if not turtle.forward() then
+                        addLog("Miner: !! MOVEMENT BLOCKED (North) !! Skipping block.")
+                        minerStatusLabel:setText("Movement blocked! Skipping.")
+                        goto next_block
                     end
 
                     offset[3] = offset[3] - 1
                     removeBlockAt(offset[1], offset[2], offset[3], blocks)
-                    turtle.forward()
                 end
             end
 
             if block.y > 0 then
+                addLog("Miner: Moving Up...")
                 while offset[2] ~= block.y do
-                    while turtle.detectUp() do
-                        turtle.digUp()
+                    while turtle.detectUp() do turtle.digUp() end
+
+                    -- FIX: Add movement check
+                    if not turtle.up() then
+                        addLog("Miner: !! MOVEMENT BLOCKED (Up) !! Skipping block.")
+                        minerStatusLabel:setText("Movement blocked! Skipping.")
+                        goto next_block
                     end
 
                     offset[2] = offset[2] + 1
                     removeBlockAt(offset[1], offset[2], offset[3], blocks)
-                    turtle.up()
                 end
             else
+                addLog("Miner: Moving Down...")
                 while offset[2] ~= block.y do
-                    while turtle.detectDown() do
-                        turtle.digDown()
+                    while turtle.detectDown() do turtle.digDown() end
+
+                    -- FIX: Add movement check
+                    if not turtle.down() then
+                        addLog("Miner: !! MOVEMENT BLOCKED (Down) !! Skipping block.")
+                        minerStatusLabel:setText("Movement blocked! Skipping.")
+                        goto next_block
                     end
 
                     offset[2] = offset[2] - 1
                     removeBlockAt(offset[1], offset[2], offset[3], blocks)
-                    turtle.down()
                 end
             end
 
             dug = dug + 1
-
+            addLog("Miner: Dug block. Total: " .. dug .. "/" .. startBlocksLen)
+            addLog("Miner: Re-basing coordinates.")
 
             for i = 1, #blocks do
                 blocks[i].x = blocks[i].x - offset[1]
@@ -566,13 +664,15 @@ function miner()
 
             minerProgressBar:setProgress(math.floor((dug / startBlocksLen) * 100))
             minerProgressLabel:setText(tostring(math.floor((dug / startBlocksLen) * 100)).."%")
-            
+
             currentPos[1] = currentPos[1] + offset[1]
             currentPos[2] = currentPos[2] + offset[2]
             currentPos[3] = currentPos[3] + offset[3]
             offset = {0, 0, 0}
 
-        end 
+        end
+
+        ::next_block:: -- FIX: Label for goto
     end
 
 end
@@ -583,6 +683,7 @@ local blocksDropdown = nil
 local blocksToMineList = nil
 
 local main = basalt.createFrame()
+addLog("GeoMiner v1.0 started. Initializing UI...") -- NEW LOG
 
 main:addPane():setPosition(1, 1):setSize(w, 1):setBackground(colors.gray)
 main:addLabel():setText("Geo"):setForeground(colors.lime):setPosition(1, 1)
@@ -593,18 +694,24 @@ menubar:addItem("Fuel")
 menubar:addItem("Scanner")
 menubar:addItem("Blocks")
 menubar:addItem("Miner")
+menubar:addItem("Logs") -- NEW: Logs tab
 menubar:addItem("About")
 menubar:addItem("How to use?")
 menubar:onChange(function(self, event, item)
-    frames[currentFrameName]:hide()
-    frames[item.text]:show()
-    currentFrameName = item.text
+    if frames[currentFrameName] then -- NEW: Check if frame exists
+        frames[currentFrameName]:hide()
+    end
+    if frames[item.text] then -- NEW: Check if frame exists
+        frames[item.text]:show()
+        currentFrameName = item.text
+    end
 end)
 
 frames["Fuel"] = main:addScrollableFrame():setBackground(colors.lightGray):setPosition(1, 3):setSize(w, h - 2)
 frames["Scanner"] = main:addScrollableFrame():setBackground(colors.lightGray):setPosition(1, 3):setSize(w, h - 2):hide()
 frames["Blocks"] = main:addScrollableFrame():setBackground(colors.lightGray):setPosition(1, 3):setSize(w, h - 2):hide()
 frames["Miner"] = main:addScrollableFrame():setBackground(colors.lightGray):setPosition(1, 3):setSize(w, h - 2):hide()
+frames["Logs"] = main:addScrollableFrame():setBackground(colors.lightGray):setPosition(1, 3):setSize(w, h - 2):hide() -- NEW: Logs frame
 frames["About"] = main:addScrollableFrame():setBackground(colors.lightGray):setPosition(1, 3):setSize(w, h - 2):hide()
 frames["How to use?"] = main:addScrollableFrame():setBackground(colors.lightGray):setPosition(1, 3):setSize(w, h - 2):hide()
 currentFrameName = "Fuel"
@@ -614,6 +721,7 @@ currentFrameName = "Fuel"
 local fuelLabel = frames["Fuel"]:addLabel():setText("Current fuel level: {}"):setPosition(2, 2)
 frames["Fuel"]:addButton():setText("Refuel"):setPosition(2, 4):setSize(10, 1):onClick(function(self, event, button, x, y)
     if (event == "mouse_click") and (button == 1) then
+      addLog("Refueling turtle.") -- NEW LOG
       turtle.refuel()
     end
   end)
@@ -625,6 +733,7 @@ local blocksList = nil
 local relativePositionsLabel = nil
 
 if scanner == nil then
+    addLog("!! Geo Scanner not attached !!") -- NEW LOG
     frames["Scanner"]:addLabel():setText("Geo Scanner is not attached!"):setForeground(colors.red):setPosition(2, 2)
     frames["Scanner"]:addLabel():setText("Attach Geo Scanner from"):setForeground(colors.red):setPosition(2, 3)
     frames["Scanner"]:addLabel():setText("\"Advanced Peripherals\" mod and"):setForeground(colors.red):setPosition(2, 4)
@@ -635,17 +744,20 @@ else
             if scanRadius == -1 then
                 fuelNeedLabel:show()
                 fuelNeedLabel:setText("Incorrect radius"):setForeground(colors.red)
+                addLog("Scan failed: Incorrect radius.") -- NEW LOG
                 return
             end
 
             if scanner.cost(scanRadius) > turtle.getFuelLevel() then
                 fuelNeedLabel:show()
                 fuelNeedLabel:setText("Not enough fuel"):setForeground(colors.red)
+                addLog("Scan failed: Not enough fuel.") -- NEW LOG
                 return
             end
-            
+
+            addLog("Starting scan with radius: " .. scanRadius) -- NEW LOG
             blocks = scanner.scan(scanRadius)
-            
+
             if blocks ~= nil then
                 blocksNamesSet = {}
                 blocksList:clear()
@@ -654,6 +766,7 @@ else
                 blocksToMine = {}
                 fuelNeedLabel:show()
                 fuelNeedLabel:setText("Done. Found "..tostring(#blocks).."\nblocks."):setForeground(colors.lime)
+                addLog("Scan done. Found " .. #blocks .. " blocks.") -- NEW LOG
 
                 for i = 1, #blocks do
                     local blockName = splitString(blocks[i].name, ":")[2]
@@ -669,8 +782,9 @@ else
             else
                 fuelNeedLabel:show()
                 fuelNeedLabel:setText("Some error occured"):setForeground(colors.red)
+                addLog("Scan failed: An error occurred.") -- NEW LOG
             end
-            
+
         end
     end)
 
@@ -703,29 +817,35 @@ end
 
 blocksDropdown = frames["Blocks"]:addDropdown():setPosition(2, 2):setSize(20, 1)
 frames["Blocks"]:addButton():setText("+"):setSize(3, 1):setPosition(2, 4):onClick(function(self, event, button, x, y)
-    if (event == "mouse_click") and (button == 1) and #blocks ~= 0 then
-        if blocksToMine[blocksDropdown:getItem(blocksDropdown:getItemIndex()).text] == nil then
-            blocksToMineList:addItem(blocksDropdown:getItem(blocksDropdown:getItemIndex()).text)
-            blocksToMine[blocksDropdown:getItem(blocksDropdown:getItemIndex()).text] = true
+    if (event == "mouse_click") and (button == 1) and #blocks ~= 0 and blocksDropdown:getItem(blocksDropdown:getItemIndex()) then -- FIX: Add check
+        local selectedBlock = blocksDropdown:getItem(blocksDropdown:getItemIndex()).text
+        if blocksToMine[selectedBlock] == nil then
+            blocksToMineList:addItem(selectedBlock)
+            blocksToMine[selectedBlock] = true
+            addLog("Added to mine list: " .. selectedBlock) -- NEW LOG
         end
 
     end
 end)
 
 frames["Blocks"]:addButton():setText("-"):setSize(3, 1):setPosition(7, 4):onClick(function(self, event, button, x, y)
-    if (event == "mouse_click") and (button == 1) and #blocks ~= 0 then
-        if blocksToMine[blocksDropdown:getItem(blocksDropdown:getItemIndex()).text] == true then
+    if (event == "mouse_click") and (button == 1) and #blocks ~= 0 and blocksDropdown:getItem(blocksDropdown:getItemIndex()) then -- FIX: Add check
+        local selectedBlock = blocksDropdown:getItem(blocksDropdown:getItemIndex()).text
+        if blocksToMine[selectedBlock] == true then
             tmp = blocksToMineList:getAll()
             indexToDelete = -1
 
             for i = 1, #tmp do
-                if tmp[i].text == blocksDropdown:getItem(blocksDropdown:getItemIndex()).text then
+                if tmp[i].text == selectedBlock then
                     indexToDelete = i
                     break
                 end
             end
-            blocksToMineList:removeItem(indexToDelete)
-            blocksToMine[blocksDropdown:getItem(blocksDropdown:getItemIndex()).text] = nil
+            if indexToDelete ~= -1 then -- FIX: Check if found
+                blocksToMineList:removeItem(indexToDelete)
+            end
+            blocksToMine[selectedBlock] = nil
+            addLog("Removed from mine list: " .. selectedBlock) -- NEW LOG
         end
     end
 end)
@@ -741,8 +861,9 @@ blocksToMineList = frames["Blocks"]:addList():setSize(16, h - 4):setPosition(w -
         end
     end
 
-    blocksDropdown:selectItem(indexToSelect)
-
+    if indexToSelect ~= -1 then -- FIX: Check if found
+        blocksDropdown:selectItem(indexToSelect)
+    end
 end)
 
 -- Miner frame
@@ -750,22 +871,25 @@ end)
 local usePathfinding = false
 local returnHome = false
 
-
 local minerThread = main:addThread()
 
-local usePathfinding = false
+-- local usePathfinding = false -- This is a duplicate, remove it
+-- FIX: usePathfinding is already declared above
 
 minerCheckboxUsePathfLabel = frames["Miner"]:addLabel():setText("Use pathfinding algorithm"):setPosition(4, 2)
 minerCheckboxUsePathf = frames["Miner"]:addCheckbox():setPosition(2, 2):setBackground(colors.gray):onChange(function (self)
     usePathfinding = self:getValue()
+    addLog("Use pathfinding set to: " .. tostring(usePathfinding)) -- NEW LOG
 end)
 minerCheckboxRetHLabel = frames["Miner"]:addLabel():setText("Return at start position"):setPosition(4, 4)
 minerCheckboxRetH = frames["Miner"]:addCheckbox():setPosition(2, 4):setBackground(colors.gray):onChange(function (self)
     returnAtStart = self:getValue()
+    addLog("Return at start set to: " .. tostring(returnAtStart)) -- NEW LOG
 end)
 minerDirectionLabel = frames["Miner"]:addLabel():setPosition(2, 6):setText("Select current direction:")
 minerDirectionDropdown = frames["Miner"]:addDropdown():setPosition(2, 7):onChange(function(self, event, item)
     direction[1] = string.sub(item.text, 1, 1)
+    addLog("Direction set to: " .. direction[1]) -- NEW LOG
 end)
 
 minerDirectionDropdown:addItem("South")
@@ -778,6 +902,7 @@ minerStartButton = frames["Miner"]:addButton():setText("Start"):setPosition(w - 
             minerStatusLabel:show()
             minerStatusLabel:setText("You haven't selected blocks for mining. Please,\n go to \"Blocks\" tab.")
             minerStatusLabel:setForeground(colors.red)
+            addLog("Miner start failed: No blocks selected.") -- NEW LOG
             return
         end
 
@@ -793,6 +918,12 @@ minerStartButton = frames["Miner"]:addButton():setText("Start"):setPosition(w - 
 
         goToChangeLabel = true
 
+        addLog("--- Starting Miner ---") -- NEW LOG
+        addLog("Mode: " .. (usePathfinding and "A* Pathfinding" or "Simple Dig")) -- NEW LOG
+        addLog("Return to start: " .. tostring(returnAtStart)) -- NEW LOG
+        addLog("Initial direction: " .. direction[1]) -- NEW LOG
+        addLog("Blocks to mine: " .. getSetLen(blocksToMine)) -- NEW LOG
+
         if usePathfinding then
             minerThread:start(AStarMiner)
         else
@@ -806,6 +937,9 @@ end)
 minerProgressBar = frames["Miner"]:addProgressbar():setPosition(6, math.floor((h - 3) / 2)):setSize(w - 6, 1):setProgress(0):hide()
 minerProgressLabel = frames["Miner"]:addLabel():setPosition(2, math.floor((h - 3) / 2)):hide():setText("0%")
 minerStatusLabel = frames["Miner"]:addLabel():setPosition(1, 10):hide()
+
+-- NEW: Logs frame
+logList = frames["Logs"]:addList():setSize(w - 2, h - 4):setPosition(1, 3)
 
 -- About frame
 frames["About"]:addLabel():setText("Geo"):setForeground(colors.lime):setPosition(2, 2):setFontSize(2)
@@ -911,4 +1045,5 @@ function fuelLabelUpdate()
 end
 main:addThread():start(fuelLabelUpdate)
 
+addLog("UI initialization complete. Starting main event loop.") -- NEW LOG
 basalt.autoUpdate()
