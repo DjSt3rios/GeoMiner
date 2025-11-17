@@ -381,6 +381,30 @@ function removeBlockAt(x, y, z, blocks)
     end
 end
 
+function manageInventory()
+    local junkFound = false
+    for i = 1, 16 do -- Iterate all 16 slots
+        local item = turtle.getItemDetail(i)
+
+        if item then
+            -- Clean the item name (e.g., "minecraft:cobblestone" -> "cobblestone")
+            local itemName = splitString(item.name, ":")[2]
+
+            if not blocksToMine[itemName] then
+                -- This is junk
+                junkFound = true
+                addLog("Inventory: Found junk (" .. itemName .. ") in slot " .. i .. ". Dropping.")
+                turtle.select(i)
+                turtle.drop() -- Drop all items in the stack
+            end
+        end
+    end
+
+    if junkFound then
+        turtle.select(1) -- Select slot 1 again by default
+    end
+end
+
 function simpleReturnToStart(currentPos, direction)
     addLog("simpleReturnToStart: Returning to {0,0,0} from " .. table.concat(currentPos, ","))
 
@@ -437,6 +461,8 @@ function simpleReturnToStart(currentPos, direction)
                 if not turtle.dig() then
                     addLog("!! simpleReturnToStart: FAILED to dig north. Unbreakable.")
                     break
+                else
+                    manageInventory()
                 end
             end
 
@@ -456,6 +482,8 @@ function simpleReturnToStart(currentPos, direction)
                 if not turtle.dig() then
                     addLog("!! simpleReturnToStart: FAILED to dig south. Unbreakable.")
                     break
+                else
+                    manageInventory()
                 end
             end
 
@@ -479,6 +507,8 @@ function simpleReturnToStart(currentPos, direction)
                 if not turtle.dig() then
                     addLog("!! simpleReturnToStart: FAILED to dig west. Unbreakable.")
                     break
+                else
+                                    manageInventory()
                 end
             end
 
@@ -498,6 +528,8 @@ function simpleReturnToStart(currentPos, direction)
                 if not turtle.dig() then
                     addLog("!! simpleReturnToStart: FAILED to dig east. Unbreakable.")
                     break
+                else
+                        manageInventory()
                 end
             end
 
@@ -519,6 +551,8 @@ function simpleReturnToStart(currentPos, direction)
 
     return success
 end
+
+
 
 function AStarMiner()
     addLog("AStarMiner thread started.")
@@ -623,6 +657,7 @@ function AStarMiner()
             while turtle.detect() do
                 turtle.dig()
             end
+            manageInventory()
         end
 
         dug = dug + 1
@@ -723,7 +758,12 @@ function miner()
                     addLog("Miner: Trying X-axis (" .. dir .. ")")
                     turnTo(dir, direction)
                     while turtle.detect() do
-                        if not turtle.dig() then addLog("!! FAILED to dig. Unbreakable."); break end
+                        if not turtle.dig() then
+                            addLog("!! FAILED to dig. Unbreakable.");
+                            break
+                        else
+                                    manageInventory()
+                        end
                     end
                     if turtle.forward() then
                         offset[1] = offset[1] + (dir == "E" and 1 or -1)
@@ -740,7 +780,12 @@ function miner()
                     addLog("Miner: Trying Z-axis (" .. dir .. ")")
                     turnTo(dir, direction)
                     while turtle.detect() do
-                        if not turtle.dig() then addLog("!! FAILED to dig. Unbreakable."); break end
+                        if not turtle.dig() then
+                            addLog("!! FAILED to dig. Unbreakable.");
+                            break;
+                        else
+                            manageInventory()
+                        end
                     end
                     if turtle.forward() then
                         offset[3] = offset[3] + (dir == "S" and 1 or -1)
