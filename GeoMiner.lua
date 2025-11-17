@@ -687,10 +687,15 @@ function miner()
                         end
                     end
 
-                    -- FIX: Add movement check
                     if not turtle.forward() then
                         addLog("Miner: !! MOVEMENT BLOCKED (East) !! Skipping block.")
                         minerStatusLabel:setText("Movement blocked! Skipping.")
+
+                        -- NEW FIX: Remove the problematic block so we don't pick it again
+                        for i, b in ipairs(blocks) do
+                            if b == block then table.remove(blocks, i); break end
+                        end
+
                         goto next_block
                     end
 
@@ -702,16 +707,21 @@ function miner()
                 turnTo("W", direction)
                 while offset[1] ~= block.x do
                     while turtle.detect() do
-                    if not turtle.dig() then
-                        addLog("!! FAILED to dig. Block may be unbreakable.")
-                        break -- This stops the infinite loop
+                        if not turtle.dig() then
+                            addLog("!! FAILED to dig. Block may be unbreakable.")
+                            break -- This stops the infinite loop
+                        end
                     end
-                end
 
-                    -- FIX: Add movement check
                     if not turtle.forward() then
                         addLog("Miner: !! MOVEMENT BLOCKED (West) !! Skipping block.")
                         minerStatusLabel:setText("Movement blocked! Skipping.")
+
+                        -- NEW FIX: Remove the problematic block so we don't pick it again
+                        for i, b in ipairs(blocks) do
+                            if b == block then table.remove(blocks, i); break end
+                        end
+
                         goto next_block
                     end
 
@@ -731,10 +741,15 @@ function miner()
                         end
                     end
 
-                    -- FIX: Add movement check
                     if not turtle.forward() then
                         addLog("Miner: !! MOVEMENT BLOCKED (South) !! Skipping block.")
                         minerStatusLabel:setText("Movement blocked! Skipping.")
+
+                        -- NEW FIX: Remove the problematic block so we don't pick it again
+                        for i, b in ipairs(blocks) do
+                            if b == block then table.remove(blocks, i); break end
+                        end
+
                         goto next_block
                     end
 
@@ -752,10 +767,15 @@ function miner()
                         end
                     end
 
-                    -- FIX: Add movement check
                     if not turtle.forward() then
                         addLog("Miner: !! MOVEMENT BLOCKED (North) !! Skipping block.")
                         minerStatusLabel:setText("Movement blocked! Skipping.")
+
+                        -- NEW FIX: Remove the problematic block so we don't pick it again
+                        for i, b in ipairs(blocks) do
+                            if b == block then table.remove(blocks, i); break end
+                        end
+
                         goto next_block
                     end
 
@@ -767,12 +787,24 @@ function miner()
             if block.y > 0 then
                 addLog("Miner: Moving Up...")
                 while offset[2] ~= block.y do
-                    while turtle.detectUp() do turtle.digUp() end
 
-                    -- FIX: Add movement check
+                    -- NEW FIX: Added dig check to Up/Down loops
+                    while turtle.detectUp() do
+                        if not turtle.digUp() then
+                            addLog("Miner: !! FAILED to dig Up. Block may be unbreakable.")
+                            break
+                        end
+                    end
+
                     if not turtle.up() then
                         addLog("Miner: !! MOVEMENT BLOCKED (Up) !! Skipping block.")
                         minerStatusLabel:setText("Movement blocked! Skipping.")
+
+                        -- NEW FIX: Remove the problematic block so we don't pick it again
+                        for i, b in ipairs(blocks) do
+                            if b == block then table.remove(blocks, i); break end
+                        end
+
                         goto next_block
                     end
 
@@ -782,12 +814,24 @@ function miner()
             else
                 addLog("Miner: Moving Down...")
                 while offset[2] ~= block.y do
-                    while turtle.detectDown() do turtle.digDown() end
 
-                    -- FIX: Add movement check
+                    -- NEW FIX: Added dig check to Up/Down loops
+                    while turtle.detectDown() do
+                        if not turtle.digDown() then
+                            addLog("Miner: !! FAILED to dig Down. Block may be unbreakable.")
+                            break
+                        end
+                    end
+
                     if not turtle.down() then
                         addLog("Miner: !! MOVEMENT BLOCKED (Down) !! Skipping block.")
                         minerStatusLabel:setText("Movement blocked! Skipping.")
+
+                        -- NEW FIX: Remove the problematic block so we don't pick it again
+                        for i, b in ipairs(blocks) do
+                            if b == block then table.remove(blocks, i); break end
+                        end
+
                         goto next_block
                     end
 
@@ -817,7 +861,7 @@ function miner()
 
         end
 
-        ::next_block:: -- FIX: Label for goto
+        ::next_block:: -- The 'goto' jumps here
     end
 
 end
