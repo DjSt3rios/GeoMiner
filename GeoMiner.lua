@@ -387,13 +387,20 @@ function manageInventory()
         local item = turtle.getItemDetail(i)
 
         if item then
-            -- Clean the item name (e.g., "minecraft:cobblestone" -> "cobblestone")
-            local itemName = splitString(item.name, ":")[2]
+            -- NEW FIX:
+            -- Safely get the short item name (e.g., "stone" from "minecraft:stone")
+            local itemName = item.name
+            local colonPos = string.find(itemName, ":")
+            if colonPos then
+                -- Found a colon, get the part after it
+                itemName = string.sub(itemName, colonPos + 1)
+            end
+            -- If no colon was found, itemName is just the original name (e.g., "gravel")
 
             if not blocksToMine[itemName] then
                 -- This is junk
                 junkFound = true
-                addLog("Inventory: Found junk (" .. itemName .. ") in slot " .. i .. ". Dropping.")
+                addLog("Inventory: Found junk (" .. item.name .. ") in slot " .. i .. ". Dropping.")
                 turtle.select(i)
                 turtle.drop() -- Drop all items in the stack
             end
