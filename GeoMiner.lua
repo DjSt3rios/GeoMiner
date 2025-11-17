@@ -623,8 +623,11 @@ function AStarMiner()
 
 end
 
+-- -----------------------------------------------------------------------------
+-- NEW "SMARTER" MINER FUNCTION (v3)
+-- -----------------------------------------------------------------------------
 function miner()
-    addLog("Miner (Simple) thread started.")
+    addLog("Miner (Smart v3) thread started.")
     local startBlocksLen = countNeededBlocks(blocksToMine, blocks)
     local dug = 0
     minerStatusLabel:show()
@@ -643,7 +646,13 @@ function miner()
                 minerStatusLabel:setForeground(colors.black)
                 minerStatusLabel:setText("Returning at start")
                 addLog("Miner: Returning to start.")
-                goTo(-currentPos[1], -currentPos[2], -currentPos[3], direction, blocks)
+                local success = simpleReturnToStart(currentPos, direction)
+                if not success then
+                    addLog("Miner: !! FAILED to return to start !!")
+                    minerStatusLabel:setText("Return failed!")
+                    minerStatusLabel:setForeground(colors.red)
+                    os.sleep(2)
+                end
             end
 
             minerStatusLabel:setForeground(colors.lime)
@@ -658,7 +667,6 @@ function miner()
             minerCheckboxRetH:show()
             minerCheckboxUsePathfLabel:show()
             minerCheckboxRetHLabel:show()
-
             break
         end
 
@@ -670,108 +678,105 @@ function miner()
             minerStatusLabel:setText("Moving to "..currentBlockName)
             addLog("Miner: Moving to " .. currentBlockName)
 
-            if block.x > 0 then
-                addLog("Miner: Moving East...")
-                turnTo("E", direction)
-                while offset[1] ~= block.x do
-                    while turtle.detect() do turtle.dig() end
+            local moveSuccessful = true -- Flag for this block
 
-                    -- FIX: Add movement check
-                    if not turtle.forward() then
-                        addLog("Miner: !! MOVEMENT BLOCKED (East) !! Skipping block.")
-                        minerStatusLabel:setText("Movement blocked! Skipping.")
-                        goto next_block
+            -- This loop runs until we reach the block or give up
+            while (offset[1] ~= block.x or offset[2] ~= block.y or offset[3] ~= block.z) and moveSuccessful do
+
+                local dx = block.x - offset[1]
+                local dy = block.y - offset[2]
+                local dz = block.z - offset[3]
+
+                local movedThisStep = false
+
+                -- 1. Try to move on X-axis if needed
+                if dx ~= 0 and not movedThisStep then
+                    local dir = dx > 0 and "E" or "W"
+                    addLog("Miner: Trying X-axis (" .. dir .. ")")
+                    turnTo(dir, direction)
+                    while turtle.detect() do
+                        if not turtle.dig() then addLog("!! FAILED to dig. Unbreakable."); break end
+                    end
+                    if turtle.forward() then
+                        offset[1] = offset[1] + (dir == "E" and 1 or -1)
+                        movedThisStep = true
+                        addLog("Miner: Moved on X-axis.")
+                    else
+                        addLog("Miner: X-axis is blocked.")
+                    end
+                end
+
+                -- 2. Try to move on Z-axis if needed
+                if dz ~= 0 and not movedThisStep then
+                    local dir = dz > 0 and "S" or "N"
+                    addLog("Miner: Trying Z-axis (" .. dir .. ")")
+                    turnTo(dir, direction)
+                    while turtle.detect() do
+                        if not turtle.dig() then addLog("!! FAILED to dig. Unbreakable."); break end
+                    end
+                    if turtle.forward() then
+                        offset[3] = offset[3] + (dir == "S" and 1 or -1)
+                        movedThisStep = true
+                        addLog("Miner: Moved on Z-axis.")
+                    else
+                        addLog("Miner: Z-axis is blocked.")
+                    end
+                end
+
+                -- 3. Try to move on Y-axis if needed
+                if dy ~= 0 and not movedThisStep then
+                    local dir = dy > 0 and "U" or "D"
+                    addLog("Miner: Trying Y-axis (" .. dir .. ")")
+                    if dir == "U" then
+                        while turtle.detectUp() do
+                            if not turtle.digUp() then addLog("!! FAILED to dig. Unbreakable."); break end
+                        end
+                        if turtle.up() then
+                            offset[2] = offset[2] + 1
+                            movedThisStep = true
+                            addLog("Miner: Moved on Y-axis.")
+                        else
+                            addLog("Miner: Y-axis (Up) is blocked.")
+                        end
+                    else -- dir == "D"
+                        while turtle.detectDown() do
+                            if not turtle.digDown() then addLog("!! FAILED to dig. Unbreakable."); break end
+                        end
+                        if turtle.down() then
+                            offset[2] = offset[2] - 1
+                            movedThisStep = true
+                            addLog("Miner: Moved on Y-axis.")
+                        else
+                             addLog("Miner: Y-axis (Down) is blocked.")
+                        end
+                    end
+                end
+
+                if movedThisStep then
+                    -- If we moved, clear the block we just moved into
+                    removeBlockAt(offset[1], offset[2], offset[3], blocks)
+                else
+                    -- We have tried all 3 axes that get us closer, and all failed.
+                    -- This block is unreachable with this logic.
+                    addLog("Miner: !! MOVEMENT FAILED on all axes. Skipping block.")
+                    minerStatusLabel:setText("Blocked! Skipping.")
+
+                    -- Remove the problematic block so we don't pick it again
+                    for i, b in ipairs(blocks) do
+                        if b == block then table.remove(blocks, i); break end
                     end
 
-                    offset[1] = offset[1] + 1
-                    removeBlockAt(offset[1], offset[2], offset[3], blocks)
+                    moveSuccessful = false -- This will break the 'while' loop
                 end
-            else
-                addLog("Miner: Moving West...")
-                turnTo("W", direction)
-                while offset[1] ~= block.x do
-                    while turtle.detect() do turtle.dig() end
+            end -- End 'while' (move to block)
 
-                    -- FIX: Add movement check
-                    if not turtle.forward() then
-                        addLog("Miner: !! MOVEMENT BLOCKED (West) !! Skipping block.")
-                        minerStatusLabel:setText("Movement blocked! Skipping.")
-                        goto next_block
-                    end
-
-                    offset[1] = offset[1] - 1
-                    removeBlockAt(offset[1], offset[2], offset[3], blocks)
-                end
+            if not moveSuccessful then
+                goto next_block -- Jump to the end of the main 'while' loop
             end
 
-            if block.z > 0 then
-                addLog("Miner: Moving South...")
-                turnTo("S", direction)
-                while offset[3] ~= block.z do
-                    while turtle.detect() do turtle.dig() end
-
-                    -- FIX: Add movement check
-                    if not turtle.forward() then
-                        addLog("Miner: !! MOVEMENT BLOCKED (South) !! Skipping block.")
-                        minerStatusLabel:setText("Movement blocked! Skipping.")
-                        goto next_block
-                    end
-
-                    offset[3] = offset[3] + 1
-                    removeBlockAt(offset[1], offset[2], offset[3], blocks)
-                end
-            else
-                addLog("Miner: Moving North...")
-                turnTo("N", direction)
-                while offset[3] ~= block.z do
-                    while turtle.detect() do turtle.dig() end
-
-                    -- FIX: Add movement check
-                    if not turtle.forward() then
-                        addLog("Miner: !! MOVEMENT BLOCKED (North) !! Skipping block.")
-                        minerStatusLabel:setText("Movement blocked! Skipping.")
-                        goto next_block
-                    end
-
-                    offset[3] = offset[3] - 1
-                    removeBlockAt(offset[1], offset[2], offset[3], blocks)
-                end
-            end
-
-            if block.y > 0 then
-                addLog("Miner: Moving Up...")
-                while offset[2] ~= block.y do
-                    while turtle.detectUp() do turtle.digUp() end
-
-                    -- FIX: Add movement check
-                    if not turtle.up() then
-                        addLog("Miner: !! MOVEMENT BLOCKED (Up) !! Skipping block.")
-                        minerStatusLabel:setText("Movement blocked! Skipping.")
-                        goto next_block
-                    end
-
-                    offset[2] = offset[2] + 1
-                    removeBlockAt(offset[1], offset[2], offset[3], blocks)
-                end
-            else
-                addLog("Miner: Moving Down...")
-                while offset[2] ~= block.y do
-                    while turtle.detectDown() do turtle.digDown() end
-
-                    -- FIX: Add movement check
-                    if not turtle.down() then
-                        addLog("Miner: !! MOVEMENT BLOCKED (Down) !! Skipping block.")
-                        minerStatusLabel:setText("Movement blocked! Skipping.")
-                        goto next_block
-                    end
-
-                    offset[2] = offset[2] - 1
-                    removeBlockAt(offset[1], offset[2], offset[3], blocks)
-                end
-            end
-
+            -- If we're here, we successfully reached the block's location
             dug = dug + 1
-            addLog("Miner: Dug block. Total: " .. dug .. "/" .. startBlocksLen)
+            addLog("Miner: Reached and dug block. Total: " .. dug .. "/" .. startBlocksLen)
             addLog("Miner: Re-basing coordinates.")
 
             for i = 1, #blocks do
@@ -780,7 +785,6 @@ function miner()
                 blocks[i].z = blocks[i].z - offset[3]
             end
 
-
             minerProgressBar:setProgress(math.floor((dug / startBlocksLen) * 100))
             minerProgressLabel:setText(tostring(math.floor((dug / startBlocksLen) * 100)).."%")
 
@@ -788,13 +792,14 @@ function miner()
             currentPos[2] = currentPos[2] + offset[2]
             currentPos[3] = currentPos[3] + offset[3]
             offset = {0, 0, 0}
-
         end
 
-        ::next_block:: -- FIX: Label for goto
+        ::next_block:: -- The 'goto' jumps here
     end
-
 end
+-- -----------------------------------------------------------------------------
+-- END OF NEW MINER FUNCTION (v3)
+-- -----------------------------------------------------------------------------
 
 -- UI
 
