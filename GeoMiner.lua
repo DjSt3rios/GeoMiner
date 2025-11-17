@@ -45,6 +45,25 @@ local returnAtStart = false
 local goToChangeLabel = false
 local currentBlockName = ""
 
+local JUNK_LIST = {
+    ["stone"] = true,
+    ["cobblestone"] = true,
+    ["dirt"] = true,
+    ["gravel"] = true,
+    ["diorite"] = true,
+    ["andesite"] = true,
+    ["granite"] = true,
+    ["deepslate"] = true,
+    ["cobbled_deepslate"] = true,
+    ["tuff"] = true,
+    ["netherrack"] = true,
+    ["sand"] = true,
+    ["sandstone"] = true,
+    ["red_sand"] = true,
+    ["red_sandstone"] = true,
+    ["end_stone"] = true
+}
+
 
 -- NEW: Logging variables
 local logList = nil
@@ -387,17 +406,15 @@ function manageInventory()
         local item = turtle.getItemDetail(i)
 
         if item then
-            -- NEW FIX:
             -- Safely get the short item name (e.g., "stone" from "minecraft:stone")
             local itemName = item.name
             local colonPos = string.find(itemName, ":")
             if colonPos then
-                -- Found a colon, get the part after it
                 itemName = string.sub(itemName, colonPos + 1)
             end
-            -- If no colon was found, itemName is just the original name (e.g., "gravel")
 
-            if not blocksToMine[itemName] then
+            -- NEW LOGIC: Check if the item is in our JUNK_LIST
+            if JUNK_LIST[itemName] then
                 -- This is junk
                 junkFound = true
                 addLog("Inventory: Found junk (" .. item.name .. ") in slot " .. i .. ". Dropping.")
