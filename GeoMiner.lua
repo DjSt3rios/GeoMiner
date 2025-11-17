@@ -390,7 +390,15 @@ function simpleReturnToStart(currentPos, direction)
     if currentPos[2] > 0 then
         addLog("Returning Down: " .. currentPos[2] .. " blocks")
         for i = 1, currentPos[2] do
-            while turtle.detectDown() do turtle.digDown() end
+
+            -- NEW FIX: Check dig success
+            while turtle.detectDown() do
+                if not turtle.digDown() then
+                    addLog("!! simpleReturnToStart: FAILED to dig down. Unbreakable.")
+                    break
+                end
+            end
+
             if not turtle.down() then
                 addLog("!! simpleReturnToStart: BLOCKED moving down !!")
                 success = false
@@ -400,7 +408,15 @@ function simpleReturnToStart(currentPos, direction)
     elseif currentPos[2] < 0 then
         addLog("Returning Up: " .. math.abs(currentPos[2]) .. " blocks")
         for i = 1, math.abs(currentPos[2]) do
-            while turtle.detectUp() do turtle.digUp() end
+
+            -- NEW FIX: Check dig success
+            while turtle.detectUp() do
+                if not turtle.digUp() then
+                    addLog("!! simpleReturnToStart: FAILED to dig up. Unbreakable.")
+                    break
+                end
+            end
+
             if not turtle.up() then
                 addLog("!! simpleReturnToStart: BLOCKED moving up !!")
                 success = false
@@ -415,12 +431,15 @@ function simpleReturnToStart(currentPos, direction)
         addLog("Returning North: " .. currentPos[3] .. " blocks")
         turnTo("N", direction)
         for i = 1, currentPos[3] do
+
+            -- NEW FIX: Check dig success
             while turtle.detect() do
                 if not turtle.dig() then
-                    addLog("!! FAILED to dig. Block may be unbreakable.")
-                    break -- This stops the infinite loop
+                    addLog("!! simpleReturnToStart: FAILED to dig north. Unbreakable.")
+                    break
                 end
             end
+
             if not turtle.forward() then
                 addLog("!! simpleReturnToStart: BLOCKED moving north !!")
                 success = false
@@ -431,12 +450,15 @@ function simpleReturnToStart(currentPos, direction)
         addLog("Returning South: " .. math.abs(currentPos[3]) .. " blocks")
         turnTo("S", direction)
         for i = 1, math.abs(currentPos[3]) do
+
+            -- NEW FIX: Check dig success
             while turtle.detect() do
                 if not turtle.dig() then
-                    addLog("!! FAILED to dig. Block may be unbreakable.")
-                    break -- This stops the infinite loop
+                    addLog("!! simpleReturnToStart: FAILED to dig south. Unbreakable.")
+                    break
                 end
             end
+
             if not turtle.forward() then
                 addLog("!! simpleReturnToStart: BLOCKED moving south !!")
                 success = false
@@ -451,12 +473,15 @@ function simpleReturnToStart(currentPos, direction)
         addLog("Returning West: " .. currentPos[1] .. " blocks")
         turnTo("W", direction)
         for i = 1, currentPos[1] do
+
+            -- NEW FIX: Check dig success
             while turtle.detect() do
                 if not turtle.dig() then
-                    addLog("!! FAILED to dig. Block may be unbreakable.")
-                    break -- This stops the infinite loop
+                    addLog("!! simpleReturnToStart: FAILED to dig west. Unbreakable.")
+                    break
                 end
             end
+
             if not turtle.forward() then
                 addLog("!! simpleReturnToStart: BLOCKED moving west !!")
                 success = false
@@ -467,12 +492,15 @@ function simpleReturnToStart(currentPos, direction)
         addLog("Returning East: " .. math.abs(currentPos[1]) .. " blocks")
         turnTo("E", direction)
         for i = 1, math.abs(currentPos[1]) do
+
+            -- NEW FIX: Check dig success
             while turtle.detect() do
                 if not turtle.dig() then
-                    addLog("!! FAILED to dig. Block may be unbreakable.")
-                    break -- This stops the infinite loop
+                    addLog("!! simpleReturnToStart: FAILED to dig east. Unbreakable.")
+                    break
                 end
             end
+
             if not turtle.forward() then
                 addLog("!! simpleReturnToStart: BLOCKED moving east !!")
                 success = false
