@@ -45,6 +45,7 @@ local returnAtStart = false
 local goToChangeLabel = false
 local currentBlockName = ""
 
+
 -- NEW: Logging variables
 local logList = nil
 local MAX_LOG_LINES = 100
@@ -414,7 +415,12 @@ function simpleReturnToStart(currentPos, direction)
         addLog("Returning North: " .. currentPos[3] .. " blocks")
         turnTo("N", direction)
         for i = 1, currentPos[3] do
-            while turtle.detect() do turtle.dig() end
+            while turtle.detect() do
+                if not turtle.dig() then
+                    addLog("!! FAILED to dig. Block may be unbreakable.")
+                    break -- This stops the infinite loop
+                end
+            end
             if not turtle.forward() then
                 addLog("!! simpleReturnToStart: BLOCKED moving north !!")
                 success = false
@@ -425,7 +431,12 @@ function simpleReturnToStart(currentPos, direction)
         addLog("Returning South: " .. math.abs(currentPos[3]) .. " blocks")
         turnTo("S", direction)
         for i = 1, math.abs(currentPos[3]) do
-            while turtle.detect() do turtle.dig() end
+            while turtle.detect() do
+                if not turtle.dig() then
+                    addLog("!! FAILED to dig. Block may be unbreakable.")
+                    break -- This stops the infinite loop
+                end
+            end
             if not turtle.forward() then
                 addLog("!! simpleReturnToStart: BLOCKED moving south !!")
                 success = false
@@ -440,7 +451,12 @@ function simpleReturnToStart(currentPos, direction)
         addLog("Returning West: " .. currentPos[1] .. " blocks")
         turnTo("W", direction)
         for i = 1, currentPos[1] do
-            while turtle.detect() do turtle.dig() end
+            while turtle.detect() do
+                if not turtle.dig() then
+                    addLog("!! FAILED to dig. Block may be unbreakable.")
+                    break -- This stops the infinite loop
+                end
+            end
             if not turtle.forward() then
                 addLog("!! simpleReturnToStart: BLOCKED moving west !!")
                 success = false
@@ -451,7 +467,12 @@ function simpleReturnToStart(currentPos, direction)
         addLog("Returning East: " .. math.abs(currentPos[1]) .. " blocks")
         turnTo("E", direction)
         for i = 1, math.abs(currentPos[1]) do
-            while turtle.detect() do turtle.dig() end
+            while turtle.detect() do
+                if not turtle.dig() then
+                    addLog("!! FAILED to dig. Block may be unbreakable.")
+                    break -- This stops the infinite loop
+                end
+            end
             if not turtle.forward() then
                 addLog("!! simpleReturnToStart: BLOCKED moving east !!")
                 success = false
@@ -659,7 +680,12 @@ function miner()
                 addLog("Miner: Moving East...")
                 turnTo("E", direction)
                 while offset[1] ~= block.x do
-                    while turtle.detect() do turtle.dig() end
+                    while turtle.detect() do
+                        if not turtle.dig() then
+                            addLog("!! FAILED to dig. Block may be unbreakable.")
+                            break -- This stops the infinite loop
+                        end
+                    end
 
                     -- FIX: Add movement check
                     if not turtle.forward() then
@@ -675,7 +701,12 @@ function miner()
                 addLog("Miner: Moving West...")
                 turnTo("W", direction)
                 while offset[1] ~= block.x do
-                    while turtle.detect() do turtle.dig() end
+                    while turtle.detect() do
+                    if not turtle.dig() then
+                        addLog("!! FAILED to dig. Block may be unbreakable.")
+                        break -- This stops the infinite loop
+                    end
+                end
 
                     -- FIX: Add movement check
                     if not turtle.forward() then
@@ -693,7 +724,12 @@ function miner()
                 addLog("Miner: Moving South...")
                 turnTo("S", direction)
                 while offset[3] ~= block.z do
-                    while turtle.detect() do turtle.dig() end
+                    while turtle.detect() do
+                        if not turtle.dig() then
+                            addLog("!! FAILED to dig. Block may be unbreakable.")
+                            break -- This stops the infinite loop
+                        end
+                    end
 
                     -- FIX: Add movement check
                     if not turtle.forward() then
@@ -709,7 +745,12 @@ function miner()
                 addLog("Miner: Moving North...")
                 turnTo("N", direction)
                 while offset[3] ~= block.z do
-                    while turtle.detect() do turtle.dig() end
+                    while turtle.detect() do
+                        if not turtle.dig() then
+                            addLog("!! FAILED to dig. Block may be unbreakable.")
+                            break -- This stops the infinite loop
+                        end
+                    end
 
                     -- FIX: Add movement check
                     if not turtle.forward() then
