@@ -51,7 +51,6 @@ local JUNK_LIST = {
     ["dirt"] = true,
     ["gravel"] = true,
     ["diorite"] = true,
-    ["andesite"] = true,
     ["granite"] = true,
     ["deepslate"] = true,
     ["cobbled_deepslate"] = true,
