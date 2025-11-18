@@ -399,7 +399,14 @@ function removeBlockAt(x, y, z, blocks)
     end
 end
 
+local manageInventoryIteration = 0
+
 function manageInventory()
+    manageInventoryIteration = manageInventoryIteration + 1;
+    if manageInventoryIteration ~= 5 then
+        break
+    end
+    manageInventoryIteration = 0;
     local junkFound = false
     for i = 1, 16 do -- Iterate all 16 slots
         local item = turtle.getItemDetail(i)
