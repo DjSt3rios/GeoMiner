@@ -1,8 +1,8 @@
 -- Save this as "refuel_station.lua"
 
 -- CONFIGURATION
-local MIN_FUEL_LIMIT = 19000000 -- Refuel if fuel is below this
-local MAX_FUEL_LIMIT = 19000000 -- Stop refueling if above this (Max is 20k usually, or 100k for advanced)
+local MIN_FUEL_LIMIT = 9000000 -- Refuel if fuel is below this
+local MAX_FUEL_LIMIT = 9000000 -- Stop refueling if above this (Max is 20k usually, or 100k for advanced)
 local CHECK_DELAY = 5 -- Seconds to wait between checks
 
 -- Function to find a specific item in the inventory
