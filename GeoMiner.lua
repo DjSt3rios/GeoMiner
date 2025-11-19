@@ -404,7 +404,7 @@ local manageInventoryIteration = 0
 function manageInventory()
     manageInventoryIteration = manageInventoryIteration + 1;
     if manageInventoryIteration ~= 5 then
-        break
+        return
     end
     manageInventoryIteration = 0;
     local junkFound = false
