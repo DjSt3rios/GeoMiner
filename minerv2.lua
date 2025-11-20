@@ -188,23 +188,49 @@ function smartMove(action, direction)
 end
 
 function skyTravel(tx, ty, tz, direction)
-    -- Used for commuting at height
-    local cx, cy, cz = gps.locate()
-    if not cx then addLog("No GPS for SkyTravel!"); return false end
+    -- 1. Get initial reliable position
+    local cx, cy, cz = getLocate()
+
+    if not cx then
+        addLog("SkyTravel Failed: No Initial GPS")
+        return false
+    end
 
     addLog("Commuting to: "..tx..","..ty..","..tz)
 
-    -- 1. Match Height
-    while cy < ty do smartMove("up"); _, cy = gps.locate() end
-    while cy > ty do smartMove("down"); _, cy = gps.locate() end
+    -- 2. Vertical Movement (Dead Reckoning)
+    -- We rely on the math instead of asking GPS every single block
+    while cy < ty do
+        if smartMove("up") then cy = cy + 1 end
+    end
 
-    -- 2. Match X
-    if cx < tx then turnTo("E", direction) while cx < tx do smartMove("forward", direction); cx=cx+1 end
-    elseif cx > tx then turnTo("W", direction) while cx > tx do smartMove("forward", direction); cx=cx-1 end end
+    while cy > ty do
+        if smartMove("down") then cy = cy - 1 end
+    end
 
-    -- 3. Match Z
-    if cz < tz then turnTo("S", direction) while cz < tz do smartMove("forward", direction); cz=cz+1 end
-    elseif cz > tz then turnTo("N", direction) while cz > tz do smartMove("forward", direction); cz=cz-1 end end
+    -- 3. Horizontal Movement X
+    local dist_x = tx - cx
+    if dist_x ~= 0 then
+        turnTo(dist_x > 0 and "E" or "W", direction)
+        for i = 1, math.abs(dist_x) do
+            if smartMove("forward") then
+                -- Update virtual coordinate
+                cx = cx + (dist_x > 0 and 1 or -1)
+            end
+        end
+    end
+
+    -- 4. Horizontal Movement Z
+    local dist_z = tz - cz
+    if dist_z ~= 0 then
+        turnTo(dist_z > 0 and "S" or "N", direction)
+        for i = 1, math.abs(dist_z) do
+            if smartMove("forward") then
+                -- Update virtual coordinate
+                cz = cz + (dist_z > 0 and 1 or -1)
+            end
+        end
+    end
 
     return true
 end
