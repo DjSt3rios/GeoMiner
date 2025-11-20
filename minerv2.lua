@@ -64,53 +64,86 @@ end
 -- FLEET COMMUNICATION & TRACKING
 -- =============================================================================
 
+function withModem(actionCallback)
+    -- 1. Check if modem is ALREADY equipped
+    if peripheral.getType("right") == "modem" then
+        return actionCallback()
+    end
+
+    -- 2. Check if modem is in Slot 16
+    local item = turtle.getItemDetail(16)
+    if not item or not item.name:find("modem") then
+        addLog("ERROR: No Modem in Slot 16!")
+        return nil
+    end
+
+    -- 3. Swap Scanner OUT, Modem IN
+    turtle.select(16)
+    if not turtle.equipRight() then
+        addLog("ERROR: Failed to equip modem.")
+        return nil
+    end
+
+    -- 4. Double Check (Paranoia check to prevent crash)
+    if peripheral.getType("right") ~= "modem" then
+        addLog("ERROR: Item in hand is not a modem!")
+        turtle.equipRight() -- Swap back immediately
+        return nil
+    end
+
+    -- 5. Perform Action
+    rednet.open("right")
+    local result = actionCallback()
+    rednet.close("right")
+
+    -- 6. Swap Modem OUT, Scanner IN
+    turtle.equipRight()
+    turtle.select(1)
+
+    return result
+end
+
 local MISSION_ABORTED = false
 
 function reportLocation(status)
-    -- 1. Check if we already aborted
+    -- 1. Check Abort
     if MISSION_ABORTED then return end
 
-    local x, y, z = gps.locate()
-    if not x then return end
-
-    -- 2. Throttle: Only run every 5 moves (unless it's a status change)
+    -- 2. Throttle (Only ping every 5 moves unless changing status)
     if status == "Mining" or status == "Moving" then
         movesSincePing = movesSincePing + 1
         if movesSincePing < 5 then return end
     end
     movesSincePing = 0
 
-    -- 3. HOT SWAP & CHECK MAILBOX
-    turtle.select(16)
-    if turtle.equipRight() then
-        rednet.open("right")
+    local x, y, z = gps.locate()
+    -- If we can't find GPS (scanner equipped), we can't report yet
+    -- But wait! The modem isn't equipped yet.
+    -- We pass the logic into the safe wrapper.
 
-        -- A. Send our status
-        rednet.broadcast({
-            role="MINER",
-            x=x, y=y, z=z,
-            status=status or "Mining"
-        }, "MINING_SQUAD")
+    withModem(function()
+        -- We are now inside the safety wrapper. Modem is Guaranteed active.
+        -- Re-check GPS now that modem is on
+        local gx, gy, gz = gps.locate()
+        if not gx then gx=x; gy=y; gz=z end -- Fallback to cached if available
 
-        -- B. CHECK FOR MESSAGES (The Fix)
-        -- We listen for 0.2 seconds while the modem is up
-        local senderId, message = rednet.receive("MINING_SQUAD", 0.2)
-
-        if message and message.command == "ABORT_RETURN" then
-            addLog("!!! ABORT SIGNAL RECEIVED !!!")
-            MISSION_ABORTED = true
-
-            -- Send Confirmation so Chunky stops screaming
+        if gx then
+            -- A. Broadcast
             rednet.broadcast({
                 role="MINER",
-                status="CONFIRM_ABORT"
+                x=gx, y=gy, z=gz,
+                status=status or "Mining"
             }, "MINING_SQUAD")
-        end
 
-        rednet.close("right")
-        turtle.equipRight() -- Swap Scanner back
-    end
-    turtle.select(1)
+            -- B. Listen for Abort
+            local senderId, message = rednet.receive("MINING_SQUAD", 0.2)
+            if message and message.command == "ABORT_RETURN" then
+                addLog("!!! ABORT SIGNAL RECEIVED !!!")
+                MISSION_ABORTED = true
+                rednet.broadcast({ role="MINER", status="CONFIRM_ABORT" }, "MINING_SQUAD")
+            end
+        end
+    end)
 end
 
 function checkAborts()
@@ -375,132 +408,141 @@ function SectorMinerLogic()
     local COMMUTE_Y = 120
     local direction = {"S"}
 
-    -- FIX: Use safe getLocate() instead of raw gps.locate()
+    -- 1. Initial GPS Check (Safe)
     local cx, cy, cz = getLocate()
-
     if not cx then
-        addLog("CRITICAL: No GPS Signal. Aborting.")
+        addLog("CRITICAL: No GPS Signal. Is Modem in Slot 16?")
         return
     end
 
-    -- 1. Commute to Initial Target
+    -- 2. Commute to Initial Target (Long Distance Travel)
     if TARGET_X and TARGET_Z then
         addLog("Commuting to Start Zone...")
-        -- Optimization: Equip Modem PERMANENTLY for the long flight
+
+        -- Manual Swap: Equip Modem for the long flight to optimize speed
+        -- We don't use 'withModem' here because we want it to stay equipped for the whole trip
         turtle.select(16)
-        turtle.equipRight()
-        rednet.open("right")
+        local swapSuccess = turtle.equipRight()
 
-        skyTravel(TARGET_X, COMMUTE_Y, TARGET_Z, direction)
+        if swapSuccess and peripheral.getType("right") == "modem" then
+            rednet.open("right")
+            skyTravel(TARGET_X, COMMUTE_Y, TARGET_Z, direction)
+            -- Rednet stays open for reportLocation calls inside skyTravel
+        else
+            addLog("WARN: Commute started without Modem (Slot 16 issue).")
+            skyTravel(TARGET_X, COMMUTE_Y, TARGET_Z, direction)
+        end
 
-        -- Swap Scanner back for mining
+        -- Swap Back: Scanner to Right Hand for mining
         turtle.equipRight()
         turtle.select(1)
     end
 
-    -- MAIN LOOP: Infinite Sector Hopping
+    -- 3. MAIN MINING LOOP (Infinite Sector Hopping)
     while true do
-        -- FIX: Use getLocate() here
+        -- A. Check for Abort Signal
         if MISSION_ABORTED then
-                addLog("Mission Aborted. returning home...")
-                -- Add logic here to ascend and fly home
-                -- (You can copy the return logic from the previous script)
-                return
-            end
-        local startX, _, startZ = getLocate()
-
-        if not startX then
-            addLog("GPS Lost! Pausing...")
-            os.sleep(5)
-            startX, _, startZ = getLocate() -- Retry once
-            if not startX then return end -- Abort if still lost
+             addLog("Mission Aborted. Returning Home...")
+             -- Optional: Trigger your return home function here
+             return
         end
 
+        -- B. Get Local Coordinates
+        local startX, _, startZ = getLocate()
+        if not startX then
+            addLog("GPS Lost! Retrying...")
+            os.sleep(2)
+            startX, _, startZ = getLocate()
+            if not startX then
+                addLog("GPS Fail. Stopping.")
+                return
+            end
+        end
+
+        -- C. Mark Sector as Visited
         local sectorKey = math.floor(startX)..","..math.floor(startZ)
         visitedSectors[sectorKey] = true
-
         addLog("Starting Column: " .. sectorKey)
 
-        -- DESCEND AND MINE LOOP
-        local layerY = 65 -- Start scanning at surface
+        -- D. DESCEND AND MINE (Surface to Bedrock)
+        -- Note: Scanner is currently equipped (from step 2 or end of loop)
 
-        -- Go down to surface first
-        -- Optimization: Use Dead Reckoning (Math) instead of GPS to avoid tool swapping lag
+        local layerY = 65 -- Start scanning at surface level
         local _, currY, _ = getLocate()
 
+        -- Go down to surface (using math to track Y to save GPS calls)
+        if not currY then currY = COMMUTE_Y end -- Safety fallback
         while currY > layerY do
             if smartMove("down") then currY = currY - 1 end
         end
 
-        while layerY > -58 do -- Bedrock limit
-            addLog("Scanning Layer Y="..layerY)
+        while layerY > -58 do
+             -- i. Scan (Scanner is active)
+             local scanned = scanner.scan(scanRadius)
+             if scanned then
+                 clearLocalArea(scanned, direction)
+             end
+             manageInventory()
 
-            -- A. Scan (Scanner is already equipped)
-            local scanned = scanner.scan(scanRadius)
-            if scanned then
-                clearLocalArea(scanned, direction)
-            end
-            manageInventory()
+             -- ii. Check Aborts (Fuel/Signal)
+             if checkAborts() then return end
 
-            -- B. Check Fuel/Abort
-            if checkAborts() then return end
-
-            -- C. Drop to next layer (Shift down 32 blocks)
-            addLog("Dropping to next layer...")
-            for i=1, 32 do
+             -- iii. Drop to Next Layer
+             addLog("Dropping layer...")
+             for i=1, 32 do
                 if smartMove("down") then layerY = layerY - 1 end
                 if layerY <= -59 then break end
-            end
+             end
         end
 
+        -- E. ASCEND (Back to Sky)
         addLog("Column Complete. Ascending...")
-
-        -- ASCEND
-        local _, checkY, _ = getLocate() -- Get one real fix before ascending
-        local currentY = checkY or -60
+        local _, currentY, _ = getLocate()
+        if not currentY then currentY = -60 end -- Estimate if GPS fails deep down
 
         while currentY < COMMUTE_Y do
             if smartMove("up") then currentY = currentY + 1 end
         end
 
-        -- FIND NEW SECTOR
-        addLog("Calculating new sector...")
-
-        -- Get fresh GPS for calculation
-        startX, _, startZ = getLocate()
-
+        -- F. FIND NEW SECTOR & TRAVEL
+        startX, _, startZ = getLocate() -- Refresh GPS at sky level
         local foundNew = false
         local offsets = {{32,0}, {-32,0}, {0,32}, {0,-32}}
 
-        -- Equip Modem for travel again
+        -- We need to move to the new sector. Equip modem again for safety/speed.
         turtle.select(16)
-        turtle.equipRight()
-        rednet.open("right")
+        if turtle.equipRight() and peripheral.getType("right") == "modem" then
+            rednet.open("right")
 
-        -- Try random directions
-        for i=1, 10 do
-            local r = math.random(1, 4)
-            local off = offsets[r]
-            local nx = startX + off[1]
-            local nz = startZ + off[2]
-            local key = math.floor(nx)..","..math.floor(nz)
+            -- Logic to find a random unvisited neighbor
+            for i=1, 10 do
+                local r = math.random(1, 4)
+                local nx = startX + offsets[r][1]
+                local nz = startZ + offsets[r][2]
+                local key = math.floor(nx)..","..math.floor(nz)
 
-            if not visitedSectors[key] then
-                addLog("Moving to new sector: "..key)
-                skyTravel(nx, COMMUTE_Y, nz, direction)
-                foundNew = true
-                break
+                if not visitedSectors[key] then
+                    addLog("Moving to sector: "..key)
+                    skyTravel(nx, COMMUTE_Y, nz, direction)
+                    foundNew = true
+                    break
+                end
             end
-        end
 
-        if not foundNew then
-            addLog("All neighbors visited! Moving further East.")
-            skyTravel(startX + 32, COMMUTE_Y, startZ, direction)
-        end
+            if not foundNew then
+                 addLog("All neighbors visited! Moving East (Fallback)")
+                 skyTravel(startX + 32, COMMUTE_Y, startZ, direction)
+            end
 
-        -- Swap Scanner back for the next loop
-        turtle.equipRight()
-        turtle.select(1)
+            -- Swap Back to Scanner for next loop's digging
+            turtle.equipRight()
+            turtle.select(1)
+        else
+            addLog("Sector Move Error: Could not equip modem.")
+            -- Force Swap back just in case
+            turtle.equipRight()
+            return -- Abort to prevent getting lost
+        end
     end
 end
 
