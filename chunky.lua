@@ -82,29 +82,49 @@ end
 
 function initiateReturnHome()
     isReturning = true
-    log("ABORTING MISSION - RETURNING HOME")
+        log("ABORTING MISSION - RETURNING HOME")
 
-    -- 1. Command Miner to Abort
-    rednet.broadcast({
-        command = "ABORT_RETURN",
-        reason = "LOW_FUEL",
-        syncHeight = SYNC_Y
-    }, PROTOCOL)
+        local minerAcknowledged = false
 
-    log("Sent abort command. Waiting for Miner to reach Y="..SYNC_Y.."...")
+        -- 1. Spam the Alarm until Miner hears us
+        log("Broadcasting Abort Signal...")
 
-    -- 2. Wait for Miner to Ascend
-    while true do
-        local id, msg = rednet.receive(PROTOCOL)
-        if id == minerID and msg and msg.status == "AT_SYNC_HEIGHT" then
-            log("Miner confirmed at Y="..SYNC_Y..". Proceeding home.")
-            break
+        while not minerAcknowledged do
+            -- Send Command
+            rednet.broadcast({
+                command = "ABORT_RETURN",
+                reason = "LOW_FUEL",
+                syncHeight = SYNC_Y
+            }, PROTOCOL)
+
+            -- Listen for reply for 2 seconds
+            local id, msg = rednet.receive(PROTOCOL, 2)
+
+            if msg and msg.status == "CONFIRM_ABORT" then
+                log("Miner acknowledged signal.")
+                minerAcknowledged = true
+            elseif msg and msg.status == "AT_SYNC_HEIGHT" then
+                -- Miner might have skipped confirmation and just went up
+                log("Miner already at height.")
+                minerAcknowledged = true
+            else
+                log("No reply... retrying...")
+            end
         end
-        -- Resend command periodically in case Miner missed it
-        rednet.broadcast({ command = "ABORT_RETURN", syncHeight = SYNC_Y }, PROTOCOL)
-        os.sleep(2)
-    end
 
+        log("Waiting for Miner to reach Y="..SYNC_Y.."...")
+
+        -- 2. Wait for Miner to Ascend (Standard wait)
+        while true do
+            local id, msg = rednet.receive(PROTOCOL, 2) -- Timeout so we don't hang forever
+            if msg and msg.status == "AT_SYNC_HEIGHT" then
+                log("Miner ready. Proceeding home.")
+                break
+            end
+
+            -- Keep reminding them just in case
+            rednet.broadcast({ command = "ABORT_RETURN", syncHeight = SYNC_Y }, PROTOCOL)
+        end
     -- 3. Fly Home (At SAFE_Y)
     log("Flying to Home X:"..homePos.x.." Z:"..homePos.z)
     -- simpleSkyMove(homePos.x, homePos.z) -- Call your movement function
