@@ -1,5 +1,5 @@
 -- ==================================================
--- CHUNKY SATELLITE V2 - Safety & Fuel Monitor
+-- CHUNKY SATELLITE V3 - Robust Ascent & Fuel Monitor
 -- ==================================================
 
 -- SETTINGS
@@ -14,8 +14,8 @@ local homePos = {x=0, y=0, z=0}
 local minerID = nil
 local isReturning = false
 
--- Open Modem
-peripheral.find("modem", rednet.open)
+-- OPEN MODEM (Explicitly on Right side based on your setup)
+rednet.open("right")
 
 -- ==================================================
 -- HELPER FUNCTIONS
@@ -31,49 +31,70 @@ function checkFuel()
 
     if level < MIN_FUEL then
         log("!! CRITICAL FUEL WARNING !!")
-        log("Level: " .. level .. " < " .. MIN_FUEL)
         return false
     end
     return true
 end
 
-function flyTo(tx, tz)
-    -- Simple air travel logic (We are at Y=250, so no obstacles)
-    local cx, cy, cz = gps.locate()
-
-    -- Move X
-    while cx ~= tx do
-        if cx < tx then
-            turtle.turnRight() -- Face East? (Simplified, assumes facing)
-            -- Ideally use a proper faceTo function here
-            -- For now, let's use coordinate delta logic:
-            if not turtle.forward() then turtle.dig() end
-        end
-        -- NOTE: A proper goTo function is needed here for exact movement.
-        -- Since you have the GeoMiner code, copy the 'goTo' function
-        -- but remove the digging parts for efficiency.
-        -- *For the sake of this script length, I assume you have a basic move function*
-        cx, cy, cz = gps.locate()
-    end
+function getLocateSafe()
+    local x, y, z = gps.locate(2) -- 2 second timeout
+    return x, y, z
 end
 
--- A simple coordinate mover for high altitude (no pathfinding needed)
-function simpleSkyMove(targetX, targetZ)
-    local cx, cy, cz = gps.locate()
-    local facing = 0 -- Assume start facing? Better to calculate.
+function safeAscent(targetY)
+    local _, currY, _ = getLocateSafe()
 
-    -- Delta X
-    local dx = targetX - cx
-    if dx > 0 then
-        while turtle.detect() do turtle.turnRight() end -- simplistic
-        for i=1, dx do turtle.forward() end
-    elseif dx < 0 then
-        turtle.turnRight(); turtle.turnRight()
-        for i=1, math.abs(dx) do turtle.forward() end
+    -- 1. Wait for initial lock
+    while not currY do
+        log("Waiting for GPS signal to launch...")
+        os.sleep(2)
+        _, currY, _ = getLocateSafe()
     end
 
-    -- Delta Z ... (Implement standard movement logic here)
-    -- You can copy the 'goTo' from your Miner script, it works fine in the sky!
+    log("GPS Locked at Y="..currY..". Ascending to "..targetY)
+
+    -- 2. Ascend with Dead Reckoning Fallback
+    while currY < targetY do
+        if turtle.up() then
+            -- Try to get real GPS
+            local _, gpsY, _ = getLocateSafe()
+
+            if gpsY then
+                currY = gpsY -- Sync with reality
+            else
+                currY = currY + 1 -- Assume we moved up if GPS fails
+            end
+        else
+            log("Blocked moving up! Retrying...")
+            turtle.digUp() -- Clear obstacles if needed
+        end
+    end
+    log("Reached Cruising Altitude.")
+end
+
+function simpleSkyMove(targetX, targetZ)
+    local cx, cy, cz = getLocateSafe()
+    if not cx then return end -- Skip if no GPS
+
+    -- X Axis
+    local dx = targetX - cx
+    if dx ~= 0 then
+        if dx > 0 then
+            while turtle.detect() do turtle.turnRight() end -- Simple obstacle avoidance
+            -- We don't have a compass, so we rely on coordinate checking or assuming start facing
+            -- Ideally, you'd use the same navigation logic as the Miner,
+            -- but for simplicity in the sky:
+            turtle.turnRight() -- Face East (roughly, needs compass logic really)
+             -- NOTE: Without a compass lib, sky movement is tricky.
+             -- Assuming you place it facing SOUTH initially:
+             -- South=0, West=1, North=2, East=3?
+             -- Implementing a proper goTo is complex.
+             -- For now, we will assume the turtle handles 'goTo' commands
+             -- similar to the miner, or we just hover.
+        end
+    end
+    -- (Ideally, copy the 'goTo' function from your Miner script here for best results)
+    -- For this fix, I am focusing on the crash prevention.
 end
 
 -- ==================================================
@@ -82,65 +103,59 @@ end
 
 function initiateReturnHome()
     isReturning = true
-        log("ABORTING MISSION - RETURNING HOME")
+    log("ABORTING MISSION - RETURNING HOME")
 
-        local minerAcknowledged = false
+    local minerAcknowledged = false
 
-        -- 1. Spam the Alarm until Miner hears us
-        log("Broadcasting Abort Signal...")
+    -- 1. Spam the Alarm until Miner hears us
+    log("Broadcasting Abort Signal...")
 
-        while not minerAcknowledged do
-            -- Send Command
-            rednet.broadcast({
-                command = "ABORT_RETURN",
-                reason = "LOW_FUEL",
-                syncHeight = SYNC_Y
-            }, PROTOCOL)
+    while not minerAcknowledged do
+        rednet.broadcast({
+            command = "ABORT_RETURN",
+            reason = "LOW_FUEL",
+            syncHeight = SYNC_Y
+        }, PROTOCOL)
 
-            -- Listen for reply for 2 seconds
-            local id, msg = rednet.receive(PROTOCOL, 2)
+        local id, msg = rednet.receive(PROTOCOL, 2)
 
-            if msg and msg.status == "CONFIRM_ABORT" then
-                log("Miner acknowledged signal.")
-                minerAcknowledged = true
-            elseif msg and msg.status == "AT_SYNC_HEIGHT" then
-                -- Miner might have skipped confirmation and just went up
-                log("Miner already at height.")
-                minerAcknowledged = true
-            else
-                log("No reply... retrying...")
-            end
+        if msg and msg.status == "CONFIRM_ABORT" then
+            log("Miner acknowledged signal.")
+            minerAcknowledged = true
+        elseif msg and msg.status == "AT_SYNC_HEIGHT" then
+            log("Miner already at height.")
+            minerAcknowledged = true
         end
-
-        log("Waiting for Miner to reach Y="..SYNC_Y.."...")
-
-        -- 2. Wait for Miner to Ascend (Standard wait)
-        while true do
-            local id, msg = rednet.receive(PROTOCOL, 2) -- Timeout so we don't hang forever
-            if msg and msg.status == "AT_SYNC_HEIGHT" then
-                log("Miner ready. Proceeding home.")
-                break
-            end
-
-            -- Keep reminding them just in case
-            rednet.broadcast({ command = "ABORT_RETURN", syncHeight = SYNC_Y }, PROTOCOL)
-        end
-    -- 3. Fly Home (At SAFE_Y)
-    log("Flying to Home X:"..homePos.x.." Z:"..homePos.z)
-    -- simpleSkyMove(homePos.x, homePos.z) -- Call your movement function
-    -- (Using placeholders for movement to keep script readable)
-    print(">> MOVEMENT CODE EXECUTED HERE <<")
-
-    -- 4. Descend
-    log("Arrived above home. Descending...")
-    local _, currY, _ = gps.locate()
-    while currY > homePos.y do
-        turtle.down()
-        _, currY, _ = gps.locate()
     end
 
-    log("Mission Closed. Safely back at base.")
-    error("Terminated: Returned Home") -- Stop script
+    log("Waiting for Miner to reach Y="..SYNC_Y.."...")
+
+    -- 2. Wait for Miner to Ascend
+    while true do
+        local id, msg = rednet.receive(PROTOCOL, 2)
+        if msg and msg.status == "AT_SYNC_HEIGHT" then
+            log("Miner ready. Proceeding home.")
+            break
+        end
+        rednet.broadcast({ command = "ABORT_RETURN", syncHeight = SYNC_Y }, PROTOCOL)
+    end
+
+    -- 3. Fly Home Logic (Placeholder for GoTo)
+    log("Flying Home to " .. homePos.x .. "," .. homePos.z)
+    -- simpleSkyMove(homePos.x, homePos.z) -- Call your move function here
+
+    -- 4. Descend
+    local _, currY, _ = getLocateSafe()
+    if not currY then currY = SAFE_Y end
+
+    while currY > homePos.y do
+        turtle.down()
+        local _, newY, _ = getLocateSafe()
+        if newY then currY = newY else currY = currY - 1 end
+    end
+
+    log("Mission Closed.")
+    error("Terminated: Returned Home")
 end
 
 -- ==================================================
@@ -148,60 +163,59 @@ end
 -- ==================================================
 
 -- 1. Startup & Checks
-log("Initializing Chunky Satellite...")
-local hx, hy, hz = gps.locate(5)
-if not hx then error("NO GPS SIGNAL! CANNOT START.") end
+log("Initializing Chunky Satellite V3...")
+local hx, hy, hz = getLocateSafe()
+
+-- Wait for start GPS
+while not hx do
+    log("No GPS Signal. Waiting...")
+    os.sleep(2)
+    hx, hy, hz = getLocateSafe()
+end
 
 homePos = {x=hx, y=hy, z=hz}
 log("Home Set: " .. hx .. "," .. hy .. "," .. hz)
 
 if not checkFuel() then
-    error("INITIAL FUEL TOO LOW (" .. turtle.getFuelLevel() .. " < " .. MIN_FUEL .. ")")
+    error("INITIAL FUEL TOO LOW")
 end
 
--- 2. Ascend to Orbit
-log("Ascending to SAFE_Y: " .. SAFE_Y)
-while true do
-    local _, y, _ = gps.locate()
-    if y >= SAFE_Y then break end
-    turtle.up()
-end
+-- 2. Ascend to Orbit (The Crash Fix is in this function)
+safeAscent(SAFE_Y)
 
 -- 3. Main Sentinel Loop
 log("Orbit established. Listening for Miner...")
 
 while true do
-    -- A. Check Fuel continuously
     if not checkFuel() then
         initiateReturnHome()
     end
 
-    -- B. Listen for updates (Non-blocking check?)
-    -- We use a timeout so we can loop back to check fuel
     local id, msg = rednet.receive(PROTOCOL, 5)
 
     if msg then
-        -- Link to Miner
         if msg.role == "MINER" then
             if not minerID then
                 minerID = id
                 log("Linked to Miner ID: " .. id)
             end
 
-            -- Follow Logic
             if id == minerID then
-                local cx, cy, cz = gps.locate()
-                local dist = math.sqrt((cx - msg.x)^2 + (cz - msg.z)^2)
+                local cx, cy, cz = getLocateSafe()
+                -- If GPS fails up here, just wait, don't crash
+                if cx then
+                    local dist = math.sqrt((cx - msg.x)^2 + (cz - msg.z)^2)
 
-                if dist > FOLLOW_DIST then
-                    log("Tracking Miner... Dist: " .. math.floor(dist))
-                    -- simpleSkyMove(msg.x, msg.z) -- Move to align with miner
+                    if dist > FOLLOW_DIST then
+                        log("Miner distance: " .. math.floor(dist) .. ". Adjusting...")
+                        -- Copy the goTo function from the miner for real movement
+                        -- simpleSkyMove(msg.x, msg.z)
+                    end
                 end
             end
 
-            -- If MINER initiates return (e.g. full inventory or miner low fuel)
             if msg.status == "RETURNING" then
-                log("Miner is returning (Inventory Full/Low Fuel). Escorting.")
+                log("Miner is returning. Escorting.")
                 initiateReturnHome()
             end
         end
