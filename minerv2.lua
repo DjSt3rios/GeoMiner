@@ -408,46 +408,55 @@ function SectorMinerLogic()
     local COMMUTE_Y = 120
     local direction = {"S"}
 
-    -- 1. Initial GPS Check (Safe)
+    -- 1. Initial GPS Check
     local cx, cy, cz = getLocate()
     if not cx then
         addLog("CRITICAL: No GPS Signal. Is Modem in Slot 16?")
         return
     end
 
-    -- 2. Commute to Initial Target (Long Distance Travel)
+    -- 2. Commute to Initial Target
     if TARGET_X and TARGET_Z then
         addLog("Commuting to Start Zone...")
 
-        -- Manual Swap: Equip Modem for the long flight to optimize speed
-        -- We don't use 'withModem' here because we want it to stay equipped for the whole trip
+        -- Equip Modem for the long flight
         turtle.select(16)
         local swapSuccess = turtle.equipRight()
 
+        local commuteSuccess = false
+
         if swapSuccess and peripheral.getType("right") == "modem" then
             rednet.open("right")
-            skyTravel(TARGET_X, COMMUTE_Y, TARGET_Z, direction)
-            -- Rednet stays open for reportLocation calls inside skyTravel
+            commuteSuccess = skyTravel(TARGET_X, COMMUTE_Y, TARGET_Z, direction)
         else
             addLog("WARN: Commute started without Modem (Slot 16 issue).")
-            skyTravel(TARGET_X, COMMUTE_Y, TARGET_Z, direction)
+            commuteSuccess = skyTravel(TARGET_X, COMMUTE_Y, TARGET_Z, direction)
         end
+
+        -- CRITICAL FIX: If we didn't make it, DO NOT START MINING
+        if not commuteSuccess then
+            addLog("Commute Aborted/Failed. Stopping.")
+            -- Swap back just in case
+            turtle.equipRight()
+            return
+        end
+
+        addLog("Arrived at Target Zone.")
 
         -- Swap Back: Scanner to Right Hand for mining
         turtle.equipRight()
         turtle.select(1)
     end
 
-    -- 3. MAIN MINING LOOP (Infinite Sector Hopping)
+    -- 3. MAIN MINING LOOP
     while true do
-        -- A. Check for Abort Signal
+        -- Check Abort
         if MISSION_ABORTED then
              addLog("Mission Aborted. Returning Home...")
-             -- Optional: Trigger your return home function here
              return
         end
 
-        -- B. Get Local Coordinates
+        -- Get Coords
         local startX, _, startZ = getLocate()
         if not startX then
             addLog("GPS Lost! Retrying...")
@@ -459,35 +468,26 @@ function SectorMinerLogic()
             end
         end
 
-        -- C. Mark Sector as Visited
         local sectorKey = math.floor(startX)..","..math.floor(startZ)
         visitedSectors[sectorKey] = true
         addLog("Starting Column: " .. sectorKey)
 
-        -- D. DESCEND AND MINE (Surface to Bedrock)
-        -- Note: Scanner is currently equipped (from step 2 or end of loop)
-
-        local layerY = 65 -- Start scanning at surface level
+        -- DESCEND AND MINE
+        local layerY = 65
         local _, currY, _ = getLocate()
+        if not currY then currY = COMMUTE_Y end
 
-        -- Go down to surface (using math to track Y to save GPS calls)
-        if not currY then currY = COMMUTE_Y end -- Safety fallback
         while currY > layerY do
             if smartMove("down") then currY = currY - 1 end
         end
 
         while layerY > -58 do
-             -- i. Scan (Scanner is active)
              local scanned = scanner.scan(scanRadius)
-             if scanned then
-                 clearLocalArea(scanned, direction)
-             end
+             if scanned then clearLocalArea(scanned, direction) end
              manageInventory()
 
-             -- ii. Check Aborts (Fuel/Signal)
              if checkAborts() then return end
 
-             -- iii. Drop to Next Layer
              addLog("Dropping layer...")
              for i=1, 32 do
                 if smartMove("down") then layerY = layerY - 1 end
@@ -495,26 +495,24 @@ function SectorMinerLogic()
              end
         end
 
-        -- E. ASCEND (Back to Sky)
+        -- ASCEND
         addLog("Column Complete. Ascending...")
         local _, currentY, _ = getLocate()
-        if not currentY then currentY = -60 end -- Estimate if GPS fails deep down
+        if not currentY then currentY = -60 end
 
         while currentY < COMMUTE_Y do
             if smartMove("up") then currentY = currentY + 1 end
         end
 
-        -- F. FIND NEW SECTOR & TRAVEL
-        startX, _, startZ = getLocate() -- Refresh GPS at sky level
+        -- FIND NEW SECTOR
+        startX, _, startZ = getLocate()
         local foundNew = false
         local offsets = {{32,0}, {-32,0}, {0,32}, {0,-32}}
 
-        -- We need to move to the new sector. Equip modem again for safety/speed.
         turtle.select(16)
         if turtle.equipRight() and peripheral.getType("right") == "modem" then
             rednet.open("right")
 
-            -- Logic to find a random unvisited neighbor
             for i=1, 10 do
                 local r = math.random(1, 4)
                 local nx = startX + offsets[r][1]
@@ -530,18 +528,16 @@ function SectorMinerLogic()
             end
 
             if not foundNew then
-                 addLog("All neighbors visited! Moving East (Fallback)")
+                 addLog("Moving East (Fallback)")
                  skyTravel(startX + 32, COMMUTE_Y, startZ, direction)
             end
 
-            -- Swap Back to Scanner for next loop's digging
             turtle.equipRight()
             turtle.select(1)
         else
             addLog("Sector Move Error: Could not equip modem.")
-            -- Force Swap back just in case
             turtle.equipRight()
-            return -- Abort to prevent getting lost
+            return
         end
     end
 end
