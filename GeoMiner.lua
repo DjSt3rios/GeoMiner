@@ -727,6 +727,35 @@ function miner()
     local offset = {0, 0, 0}
 
     while true do
+        local myId, message = rednet.receive("MINING_SQUAD", 0.1) -- 0.1s timeout (very fast)
+
+        if message and message.command == "ABORT_RETURN" then
+            addLog("COMMAND RECEIVED: Return Home!")
+
+            -- 1. Stop Mining
+            -- 2. Ascend to Sync Height (150)
+            addLog("Ascending to Sync Height: " .. message.syncHeight)
+            local x, y, z = gps.locate()
+            while y < message.syncHeight do
+                -- Dig up if needed (safety)
+                if turtle.detectUp() then turtle.digUp() end
+                turtle.up()
+                _, y, _ = gps.locate()
+            end
+
+            -- 3. Notify Satellite we are ready
+            reportLocation("AT_SYNC_HEIGHT") -- Uses your hot-swap function
+
+            -- 4. Go to Home X, Z (at altitude)
+            addLog("Flying Home...")
+            goTo(0, 150, 0, direction, {}) -- Assuming 0,0,0 is home relative
+
+            -- 5. Descend
+            -- (Add descent logic here)
+
+            return -- Exit the mining function
+        end
+
         addLog("Miner: Finding closest block...")
         local block = findClosestBlock(blocksToMine, blocks, offset)
 
