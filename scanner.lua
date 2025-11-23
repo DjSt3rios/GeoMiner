@@ -1,4 +1,4 @@
-local geo = peripheral.find("geoScanner")
+local geo = peripheral.find("geo_scanner")
 if not geo then error("No Geo Scanner attached!") end
 
 -- --- INPUT ---
