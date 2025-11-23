@@ -19,7 +19,7 @@ end
 -- -------------
 
 local radius = 16
-local cooldown = 3
+local cooldown = 1
 
 local function getDistance(x, y, z)
     return math.sqrt(x*x + y*y + z*z)
