@@ -1,4 +1,4 @@
-local geo = peripheral.find("geo_scanner")
+local geo = peripheral.find("geoScanner")
 if not geo then error("No Geo Scanner attached!") end
 
 -- --- INPUT ---
@@ -9,17 +9,17 @@ if not target_input then
     term.clear()
     term.setCursorPos(1,1)
     term.setTextColor(colors.yellow)
-    print("--- UNIVERSAL SCANNER ---")
+    print("--- DIRECTIONAL SCANNER ---")
     term.setTextColor(colors.white)
     print("Enter partial name.")
-    print("Examples: 'diamond', 'log', 'chest'")
+    print("Examples: 'diamond', 'chest'")
     write("Target: ")
     target_input = read()
 end
 -- -------------
 
 local radius = 16
-local cooldown = 1
+local cooldown = 3
 
 local function getDistance(x, y, z)
     return math.sqrt(x*x + y*y + z*z)
@@ -39,7 +39,6 @@ while true do
     local min_dist = 9999
     local count = 0
 
-    -- For the "Did you mean?" feature
     local nearby_samples = {}
 
     if data then
@@ -47,14 +46,14 @@ while true do
             local name = string.lower(block.name)
             local search = string.lower(target_input)
 
-            -- CAPTURE SAMPLES (Grab the first 3 unique blocks we see)
+            -- Sample nearby blocks for debug
             if #nearby_samples < 3 then
                 local known = false
                 for _, s in pairs(nearby_samples) do if s == block.name then known = true end end
                 if not known then table.insert(nearby_samples, block.name) end
             end
 
-            -- CHECK FOR MATCH
+            -- Check for match
             if string.find(name, search) then
                 count = count + 1
                 local d = getDistance(block.x, block.y, block.z)
@@ -69,52 +68,56 @@ while true do
     -- DRAW HUD
     clear()
     term.setTextColor(colors.orange)
-    print("SEARCHING: " .. string.upper(target_input))
-    print("Radius: " .. radius)
+    print("TARGET: " .. string.upper(target_input))
     print("----------------")
 
     if nearest then
-        -- SUCCESS MODE
         term.setTextColor(colors.lime)
-        print("TARGET ACQUIRED!")
-        print("Count:   " .. count)
-        print("Nearest: " .. math.floor(min_dist) .. "m")
+        print("FOUND: " .. count .. " blocks")
+        print("DIST:  " .. math.floor(min_dist) .. "m")
         print("")
 
+        -- THE DIRECTIONAL LOGIC YOU ASKED FOR
         term.setTextColor(colors.white)
-        -- Height
-        if nearest.y > 0 then print("  UP:   " .. nearest.y)
-        elseif nearest.y < 0 then print("  DOWN: " .. math.abs(nearest.y))
-        else print("  LEVEL HEIGHT") end
 
-        -- Direction
-        local dirStr = ""
-        if nearest.z < 0 then dirStr = "NORTH"
-        elseif nearest.z > 0 then dirStr = "SOUTH" end
+        -- 1. North/South (Z Axis)
+        if nearest.z < 0 then
+            print("NORTH: " .. math.abs(nearest.z))
+        elseif nearest.z > 0 then
+            print("SOUTH: " .. nearest.z)
+        end
 
-        if nearest.x < 0 then dirStr = dirStr .. " WEST"
-        elseif nearest.x > 0 then dirStr = dirStr .. " EAST" end
+        -- 2. East/West (X Axis)
+        if nearest.x < 0 then
+            print("WEST:  " .. math.abs(nearest.x))
+        elseif nearest.x > 0 then
+            print("EAST:  " .. nearest.x)
+        end
 
-        if dirStr == "" then dirStr = "Here" end
-        print("  DIR:  " .. dirStr)
+        -- 3. Up/Down (Y Axis)
+        if nearest.y < 0 then
+            print("DOWN:  " .. math.abs(nearest.y))
+        elseif nearest.y > 0 then
+            print("UP:    " .. nearest.y)
+        end
+
+        -- 4. If you are standing exactly on it
+        if nearest.x == 0 and nearest.y == 0 and nearest.z == 0 then
+            term.setTextColor(colors.yellow)
+            print(">> YOU ARE HERE <<")
+        end
 
     else
         -- FAILURE / DEBUG MODE
         term.setTextColor(colors.red)
-        print("No exact match for '"..target_input.."'")
+        print("No match for '"..target_input.."'")
         print("")
-
-        term.setTextColor(colors.yellow)
-        print("I did see these nearby:")
         term.setTextColor(colors.gray)
+        print("Nearby examples:")
         for _, name in pairs(nearby_samples) do
-            -- Strip the 'minecraft:' part to make it readable
             local cleanName = name:gsub("minecraft:", ""):gsub("deepslate:", "")
             print("- " .. cleanName)
         end
-
-        print("")
-        print("Try typing one of those!")
     end
 
     sleep(cooldown)
